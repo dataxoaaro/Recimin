@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from recimin import __version__
 from recimin.api.middleware import build_origin_guard
 from recimin.api.routes import auth as auth_routes
+from recimin.api.routes import imports as import_routes
 from recimin.api.routes import media as media_routes
 from recimin.api.routes import recipes as recipe_routes
 from recimin.api.routes import tokens as token_routes
@@ -85,6 +86,7 @@ def create_app(
     app.middleware("http")(build_origin_guard(settings.allowed_origin))
 
     app.include_router(auth_routes.router, prefix="/api")
+    app.include_router(import_routes.router, prefix="/api")
     app.include_router(media_routes.router, prefix="/api")
     app.include_router(recipe_routes.router, prefix="/api")
     app.include_router(token_routes.router, prefix="/api")

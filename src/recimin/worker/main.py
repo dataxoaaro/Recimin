@@ -1,40 +1,39 @@
 """Worker entry point.
 
-Phase 0 is a heartbeat only. The job loop arrives in Phase 5, and it processes
-exactly one job at a time — concurrency of one is a requirement, not a default.
+Drains the import queue, one job at a time, until told to stop.
 """
 
 import asyncio
-import contextlib
 import logging
 import signal
 
 from recimin import __version__
-from recimin.config import Settings, get_settings
+from recimin.config import get_settings
+from recimin.db import schema
+from recimin.db.connection import connect
 from recimin.logging import configure_logging
+from recimin.worker.handlers import handle_import
+from recimin.worker.loop import run_forever
 
 logger = logging.getLogger(__name__)
-
-HEARTBEAT_SECONDS = 30
-
-
-async def run(settings: Settings, stop: asyncio.Event) -> None:
-    """Poll until asked to stop."""
-    logger.info("worker started", extra={"version": __version__})
-    while not stop.is_set():
-        logger.info("heartbeat", extra={"queue_depth": 0})
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SECONDS)
-    logger.info("worker stopped")
 
 
 async def _main() -> None:
     settings = get_settings()
+    conn = connect(settings.db_path)
+    schema.migrate(conn)
+
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
-    await run(settings, stop)
+
+    logger.info("worker started", extra={"version": __version__})
+    try:
+        await run_forever(conn, settings, handle_import, stop)
+    finally:
+        conn.close()
+        logger.info("worker stopped")
 
 
 def main() -> None:
