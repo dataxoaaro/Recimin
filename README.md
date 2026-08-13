@@ -28,6 +28,22 @@ uv run python -m recimin.worker.main
 cd frontend && pnpm install && pnpm dev
 ```
 
+## Configuration
+
+Two gitignored files, both edited here, never over ssh:
+
+| File | Used by |
+|---|---|
+| `.env` | local development — Vite's origin, `./data`, its own `JWT_SECRET` |
+| `.env.production` | the server; `scripts/deploy.sh` uploads it as `/opt/app/.env` |
+
+They cannot be one file: `ALLOWED_ORIGIN`, `DATA_DIR` and `JWT_SECRET` must
+differ between them, the last so a session minted locally is not valid in
+production.
+
+`deploy.sh` validates `.env.production` before doing anything slow, and refuses
+to deploy on a missing key or a leftover placeholder.
+
 ## Checks
 
 ```bash

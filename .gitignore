@@ -14,7 +14,12 @@ node_modules/
 frontend/dev-dist/
 
 # Local data and secrets
+# Every .env variant is ignored, including .env.production, which holds the
+# real server secrets. Only the example is tracked. The pattern is a catch-all
+# rather than a list so a new environment cannot be committed by omission.
 .env
+.env.*
+!.env.example
 .dev.vars
 data/
 backups/
