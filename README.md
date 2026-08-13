@@ -30,19 +30,25 @@ cd frontend && pnpm install && pnpm dev
 
 ## Configuration
 
-Two gitignored files, both edited here, never over ssh:
+One `.env`, gitignored, living in this directory. `scripts/deploy.sh` uploads
+it to the server unchanged. Edit it here, never over ssh — a copy edited on the
+server looks applied and silently is not.
 
-| File | Used by |
-|---|---|
-| `.env` | local development — Vite's origin, `./data`, its own `JWT_SECRET` |
-| `.env.production` | the server; `scripts/deploy.sh` uploads it as `/opt/app/.env` |
+The three values the server needs to differ on are in `docker-compose.yml`
+under `environment:`, which overrides `env_file:`:
 
-They cannot be one file: `ALLOWED_ORIGIN`, `DATA_DIR` and `JWT_SECRET` must
-differ between them, the last so a session minted locally is not valid in
-production.
+| Key | Local `.env` | Server, via compose |
+|---|---|---|
+| `DATA_DIR` | `./data` | `/data` |
+| `ALLOWED_ORIGIN` | `http://localhost:5173` | `https://recimin.com` |
+| `MAX_MEDIA_BYTES` | whatever suits the laptop | bounded by the host's 63 GB disk |
 
-`deploy.sh` validates `.env.production` before doing anything slow, and refuses
-to deploy on a missing key or a leftover placeholder.
+Keeping them there rather than in a second env file means they are committed
+and reviewable instead of hidden in an untracked file that can drift.
+
+`deploy.sh` refuses to run — before the slow frontend build — when a key from
+`.env.example` is missing, still holds a placeholder, or when dropping
+`CLOUDFLARE_TUNNEL_TOKEN` would take the live site offline.
 
 ## Checks
 

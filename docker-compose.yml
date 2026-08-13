@@ -1,3 +1,18 @@
+# There is exactly one .env, holding secrets, and deploy.sh uploads it here
+# unchanged. The handful of values the server needs to differ on live below
+# instead: `environment:` overrides `env_file:`, so these win over whatever the
+# laptop's .env happens to say. Keeping them here rather than in a second env
+# file means they are committed, reviewable, and cannot silently drift.
+#
+#   DATA_DIR         the container path, not the laptop's ./data
+#   ALLOWED_ORIGIN   the public hostname; drives the CSRF check and the Secure
+#                    cookie flag, and locally must be Vite's http://localhost:5173
+#   MAX_MEDIA_BYTES  bounded by this host's 63 GB disk, whatever the laptop says
+x-server-env: &server-env
+  DATA_DIR: /data
+  ALLOWED_ORIGIN: https://recimin.com
+  MAX_MEDIA_BYTES: "50000000000"
+
 services:
   api:
     build:
@@ -9,8 +24,7 @@ services:
     volumes:
       - ./data:/data
     env_file: .env
-    environment:
-      DATA_DIR: /data
+    environment: *server-env
     restart: unless-stopped
 
   worker:
@@ -21,8 +35,7 @@ services:
     volumes:
       - ./data:/data
     env_file: .env
-    environment:
-      DATA_DIR: /data
+    environment: *server-env
     restart: unless-stopped
     depends_on:
       - api
