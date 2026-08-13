@@ -23,6 +23,11 @@ export default defineConfig({
         background_color: "#faf6ee",
         icons: [
           { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" },
+          // Raster fallbacks. An SVG-only icon set is enough for Chrome but
+          // leaves Safari and older Android installers with nothing to use.
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
         // A silent no-op on iOS — WebKit has never implemented share_target and
         // the bug has been open since 2019. Five lines, and it buys Android and
@@ -34,7 +39,7 @@ export default defineConfig({
         },
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,svg}"],
+        globPatterns: ["**/*.{js,css,svg,png}"],
         // Push and notificationclick handlers. generateSW cannot express them,
         // so they arrive as a script the generated worker imports.
         importScripts: ["/push-sw.js"],

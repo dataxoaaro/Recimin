@@ -28,6 +28,33 @@ logger = logging.getLogger(__name__)
 
 SPA_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
+# Everything the SPA route serves has a stable name — index.html, sw.js,
+# manifest.webmanifest, the icons — so a deploy replaces the contents behind an
+# unchanged URL. Without a Cache-Control header Cloudflare applies its own
+# default of four hours, which was observed serving a superseded icon.svg with
+# `cf-cache-status: HIT` half an hour after a deploy. On sw.js that is worse
+# than cosmetic: browsers only bypass the HTTP cache for a service worker when
+# max-age exceeds 86400, so an installed PWA keeps running the old build.
+#
+# `no-cache` still caches — it requires revalidation first, so the common case
+# is a cheap 304 rather than a refetch. Hashed assets under /assets are the
+# opposite case and are handled by _ImmutableStatic.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class _ImmutableStatic(StaticFiles):
+    """Static files whose names carry a content hash, so they never change.
+
+    Vite fingerprints everything under /assets, which makes a year-long
+    immutable cache both safe and the only way to avoid revalidating every
+    asset on every navigation.
+    """
+
+    def file_response(self, *args: object, **kwargs: object) -> Response:
+        response = super().file_response(*args, **kwargs)  # type: ignore[arg-type]
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
 
 def _mount_spa(app: FastAPI) -> None:
     """Serve the built SPA, falling back to index.html for client-side routes.
@@ -38,7 +65,7 @@ def _mount_spa(app: FastAPI) -> None:
         logger.info("spa not built, serving api only", extra={"dir": str(SPA_DIR)})
         return
 
-    app.mount("/assets", StaticFiles(directory=SPA_DIR / "assets"), name="assets")
+    app.mount("/assets", _ImmutableStatic(directory=SPA_DIR / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str) -> FileResponse:
@@ -46,8 +73,8 @@ def _mount_spa(app: FastAPI) -> None:
         # Serve a real file when one exists (sw.js, manifest, icon), otherwise
         # hand back the shell so deep links like /settings work on reload.
         if path and candidate.is_file() and SPA_DIR in candidate.resolve().parents:
-            return FileResponse(candidate)
-        return FileResponse(SPA_DIR / "index.html")
+            return FileResponse(candidate, headers=_NO_CACHE)
+        return FileResponse(SPA_DIR / "index.html", headers=_NO_CACHE)
 
 
 def create_app(
