@@ -1,5 +1,6 @@
 """Shared test fixtures."""
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -8,9 +9,13 @@ from fastapi.testclient import TestClient
 
 from recimin.api.main import create_app
 from recimin.config import Settings
+from recimin.db import schema
+from recimin.db.connection import connect
 
 TEST_JWT_SECRET = "x" * 32
 TEST_SITE_PASSWORD = "test-site-password"
+TEST_EMAIL = "aaro@example.fi"
+TEST_PASSWORD = "correct-horse-battery"
 
 _ENV_KEYS = (
     "JWT_SECRET",
@@ -48,7 +53,33 @@ def settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
-def client(settings: Settings) -> Iterator[TestClient]:
-    """A TestClient bound to an app built from the test settings."""
-    with TestClient(create_app(settings)) as test_client:
+def db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
+    """A migrated database on disk, shared with the app under test."""
+    conn = connect(tmp_path / "recimin.db")
+    schema.migrate(conn)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def client(settings: Settings, db: sqlite3.Connection) -> Iterator[TestClient]:
+    """A TestClient sharing the `db` fixture's file, so tests can inspect state."""
+    app = create_app(settings, db_factory=lambda: connect(settings.db_path), migrate=False)
+    with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def auth_client(client: TestClient) -> TestClient:
+    """A TestClient with a registered, signed-in user."""
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": TEST_EMAIL,
+            "password": TEST_PASSWORD,
+            "display_name": "Aaro",
+            "site_password": TEST_SITE_PASSWORD,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return client
