@@ -15,6 +15,7 @@ dependencies = [
     "extruct>=0.18",
     "selectolax>=0.3",
     "recipe-scrapers>=15.12",
+    "pywebpush>=2.0",
 ]
 
 [project.scripts]

@@ -35,6 +35,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,svg}"],
+        // Push and notificationclick handlers. generateSW cannot express them,
+        // so they arrive as a script the generated worker imports.
+        importScripts: ["/push-sw.js"],
         navigateFallback: null,
         runtimeCaching: [
           {

@@ -4,7 +4,7 @@
  * Every request carries credentials so the session cookie travels; the PWA and
  * Safari have separate cookie jars, and the installed app must send its own.
  */
-import type { Category, Job, Recipe, RecipeSummary, User } from "@/lib/types";
+import type { ApiToken, Category, Job, Recipe, RecipeSummary, User } from "@/lib/types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -70,4 +70,19 @@ export const api = {
     request<Recipe>(`/recipes/${id}/favourite`, { method: "POST" }),
 
   listJobs: () => request<Job[]>("/imports"),
+  retryJob: (id: number) => request<Job>(`/imports/${id}/retry`, { method: "POST" }),
+  queueImport: (url: string) =>
+    request<{ job_id: number; duplicate: boolean; recipe_id: number | null }>("/import", {
+      method: "POST",
+      body: json({ url }),
+    }),
+
+  listTokens: () => request<ApiToken[]>("/tokens"),
+  createToken: (name: string) =>
+    request<ApiToken & { token: string }>("/tokens", { method: "POST", body: json({ name }) }),
+  revokeToken: (id: number) => request<void>(`/tokens/${id}`, { method: "DELETE" }),
+
+  pushKey: () => request<{ key: string }>("/push/key"),
+  pushSubscribe: (subscription: unknown) =>
+    request<{ id: number }>("/push/subscribe", { method: "POST", body: json(subscription) }),
 };

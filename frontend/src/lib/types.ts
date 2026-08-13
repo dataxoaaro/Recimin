@@ -67,3 +67,11 @@ export interface Job {
   created_at: string;
   finished_at: string | null;
 }
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
