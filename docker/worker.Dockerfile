@@ -34,6 +34,7 @@ RUN yt-dlp --list-impersonate-targets | grep -q curl_cffi \
  || (echo "FATAL: no curl_cffi impersonate targets; the curl-cffi extra did not install" && exit 1)
 
 COPY src/ ./src/
+COPY migrations/ ./migrations/
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"

@@ -27,12 +27,22 @@ def discover(migrations_dir: Path = MIGRATIONS_DIR) -> list[tuple[int, Path]]:
     always means a file was renamed or lost, and applying around it corrupts the
     version counter.
     """
+    if not migrations_dir.is_dir():
+        raise FileNotFoundError(f"migrations directory not found: {migrations_dir}")
+
     found: list[tuple[int, Path]] = []
     for path in sorted(migrations_dir.glob("*.sql")):
         match = _FILENAME.match(path.name)
         if match is None:
             raise ValueError(f"migration filename must be NNNN_name.sql: {path.name}")
         found.append((int(match.group(1)), path))
+
+    if not found:
+        # "up to date at version 0" is a lie that only surfaces on a cold start,
+        # when the app comes up with no schema and every request 500s. This is
+        # exactly how a Dockerfile that forgot to COPY migrations/ stayed hidden
+        # behind a host-mounted database that already had one.
+        raise FileNotFoundError(f"no migrations found in {migrations_dir}")
 
     versions = [v for v, _ in found]
     if len(set(versions)) != len(versions):

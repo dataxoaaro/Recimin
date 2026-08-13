@@ -5,7 +5,7 @@ import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -94,7 +94,7 @@ def create_app(
     app.include_router(token_routes.router, prefix="/api")
 
     @app.get("/health")
-    def health() -> dict[str, object]:
+    def health(response: Response) -> dict[str, object]:
         conn = factory()
         try:
             depth = jobs_repo.queue_depth(conn)
@@ -104,6 +104,14 @@ def create_app(
             db_ok = False
         finally:
             conn.close()
+
+        if not db_ok:
+            # 503, not 200-with-a-sad-word. Docker's healthcheck is `curl -fsS`,
+            # which only fails on a >=400 status, so returning 200 here means a
+            # container with an unreachable database reports itself healthy —
+            # precisely the failure a healthcheck exists to catch.
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
         return {"status": "ok" if db_ok else "degraded", "version": __version__, "queue": depth}
 
     # Registered last: it is a catch-all, and FastAPI matches in declaration

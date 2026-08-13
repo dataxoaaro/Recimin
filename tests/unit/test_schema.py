@@ -244,3 +244,20 @@ def test_fts_has_exactly_one_row_per_recipe(db: sqlite3.Connection) -> None:
         )
     db.execute("UPDATE recipes SET title = 'Cake II' WHERE id = ?", (rid,))
     assert db.execute("SELECT count(*) FROM recipes_fts").fetchone()[0] == 1
+
+
+def test_a_missing_migrations_directory_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="not found"):
+        schema.discover(tmp_path / "nope")
+
+
+def test_an_empty_migrations_directory_raises(tmp_path: Path) -> None:
+    """'Up to date at version 0' is a lie.
+
+    It hides a container built without the migrations directory: the app starts,
+    reports healthy, and 500s on the first request that touches a table.
+    """
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(FileNotFoundError, match="no migrations"):
+        schema.discover(empty)

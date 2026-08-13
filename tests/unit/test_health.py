@@ -29,3 +29,28 @@ def test_api_docs_are_not_served(client: TestClient) -> None:
     assert client.get("/openapi.json").status_code != 200 or (
         "openapi" not in client.get("/openapi.json").text[:200].lower()
     )
+
+
+def test_health_is_503_when_the_database_is_unreachable(settings, tmp_path) -> None:
+    """Docker's healthcheck is `curl -fsS`, which only fails on >=400.
+
+    Returning 200 with status:"degraded" means a container that cannot reach its
+    database reports itself healthy — the exact failure a healthcheck exists to
+    catch.
+    """
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    from recimin.api.main import create_app
+
+    def broken() -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        return conn  # no schema, so queue_depth raises
+
+    with TestClient(create_app(settings, db_factory=broken, migrate=False)) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"

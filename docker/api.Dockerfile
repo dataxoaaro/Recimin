@@ -19,6 +19,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src/ ./src/
+COPY migrations/ ./migrations/
 RUN uv sync --frozen --no-dev
 
 # The built SPA. Vite output only — no node_modules, no toolchain.
