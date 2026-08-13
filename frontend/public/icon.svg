@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="104" fill="#faf6ee"/>
+  <!-- A bookmark in a page: this app is where recipes are kept. -->
+  <path d="M148 116h216a20 20 0 0 1 20 20v264a12 12 0 0 1-19 9.8L256 322l-109 87.8A12 12 0 0 1 128 400V136a20 20 0 0 1 20-20z" fill="#a8502f"/>
+  <path d="M196 186h120M196 236h120M196 286h76" stroke="#faf6ee" stroke-width="20" stroke-linecap="round"/>
+</svg>

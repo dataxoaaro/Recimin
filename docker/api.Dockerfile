@@ -21,6 +21,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 
+# The built SPA. Vite output only — no node_modules, no toolchain.
+COPY frontend/dist/ ./frontend/dist/
+
 ENV PATH="/app/.venv/bin:$PATH"
 
 VOLUME ["/data"]

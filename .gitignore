@@ -10,7 +10,7 @@ htmlcov/
 
 # Node
 node_modules/
-frontend/dist/
+
 frontend/dev-dist/
 
 # Local data and secrets
