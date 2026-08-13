@@ -5,6 +5,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { AuthProvider } from "@/lib/auth-context";
 import { Imports } from "@/routes/Imports";
 import { Library } from "@/routes/Library";
+import { RecipeDetail } from "@/routes/RecipeDetail";
 import { Register } from "@/routes/Register";
 import { Settings } from "@/routes/Settings";
 import { SignIn } from "@/routes/SignIn";
@@ -26,6 +27,7 @@ export default function App() {
             }
           >
             <Route index element={<Library />} />
+            <Route path="recipes/:id" element={<RecipeDetail />} />
             <Route path="imports" element={<Imports />} />
             <Route path="settings" element={<Settings />} />
           </Route>
