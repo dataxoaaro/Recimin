@@ -7,14 +7,17 @@ same signature.
 import asyncio
 import logging
 import sqlite3
+from pathlib import Path
 
 from recimin.config import Settings
-from recimin.db.models import Job, JobStage, RecipeStatus, SourcePlatform
+from recimin.db.models import CaptionGate, Job, JobStage, RecipeStatus, SourcePlatform
 from recimin.db.repositories import jobs as jobs_repo
+from recimin.db.repositories import media as media_repo
 from recimin.db.repositories import recipes as recipes_repo
 from recimin.db.repositories.ingredients import IngredientDraft
 from recimin.db.repositories.recipes import RecipeDraft
-from recimin.importer import web
+from recimin.importer import caption as caption_gate
+from recimin.importer import social, web
 from recimin.importer.normalise import NormalisedRecipe
 from recimin.importer.urls import Classified, Platform, UrlRejected, classify
 from recimin.worker.loop import NonRetryable
@@ -61,6 +64,54 @@ def persist(
     )
 
 
+async def _import_social(
+    conn: sqlite3.Connection, job: Job, classified: Classified, settings: Settings
+) -> tuple[NormalisedRecipe, list[int]]:
+    """Fetch a social post: caption first, then media, then a draft."""
+    try:
+        metadata = await social.fetch_metadata(classified, settings)
+    except social.SocialFetchFailed as error:
+        if error.needs_update:
+            # The extractor is stale rather than the URL bad. Try one in-place
+            # upgrade; if that does not help, a human has to look.
+            from recimin.importer import ytdlp
+
+            if await ytdlp.self_update():
+                metadata = await social.fetch_metadata(classified, settings)
+            else:
+                raise NonRetryable(f"yt-dlp needs updating: {error}") from None
+        else:
+            raise
+
+    gate = (
+        CaptionGate.HIT if caption_gate.looks_like_a_recipe(metadata.caption) else CaptionGate.MISS
+    )
+    jobs_repo.set_caption_gate(conn, job.id, gate)
+    logger.info(
+        "caption gate",
+        extra={"job_id": job.id, "verdict": str(gate), "caption_chars": len(metadata.caption)},
+    )
+
+    # The gate decides whether extraction is needed, never whether media is
+    # kept: the archive is the point, and the source post may be deleted.
+    jobs_repo.set_stage(conn, job.id, JobStage.MEDIA)
+    files: list[Path] = []
+    try:
+        files, subtitles = await social.download_media(classified, settings)
+        media_ids = social.store_media(
+            conn, files, settings=settings, source_url=classified.normalised
+        )
+    except social.SocialFetchFailed as error:
+        if error.needs_update:
+            raise NonRetryable(f"yt-dlp needs updating: {error}") from None
+        raise
+    finally:
+        if files:
+            await social.cleanup(files)
+
+    return social.draft_from_caption(metadata, classified, subtitles), media_ids
+
+
 async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) -> int | None:
     """Route a job to its extractor and return the resulting recipe id."""
     jobs_repo.set_stage(conn, job.id, JobStage.RESOLVE)
@@ -77,18 +128,23 @@ async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) 
         logger.info("already imported", extra={"job_id": job.id, "recipe_id": existing.id})
         return existing.id
 
-    if classified.platform is not Platform.WEB:
-        raise NonRetryable(f"{classified.platform} import is not implemented yet")
-
     jobs_repo.set_stage(conn, job.id, JobStage.FETCH)
-    try:
-        # httpx is synchronous here; keep the event loop free for the API.
-        recipe = await asyncio.to_thread(web.extract, classified.normalised, settings)
-    except web.NoRecipeFound as error:
-        raise NonRetryable(str(error)) from None
+    if classified.platform is Platform.WEB:
+        try:
+            # httpx is synchronous here; keep the event loop free for the API.
+            recipe = await asyncio.to_thread(web.extract, classified.normalised, settings)
+        except web.NoRecipeFound as error:
+            raise NonRetryable(str(error)) from None
+        media_ids: list[int] = []
+    else:
+        recipe, media_ids = await _import_social(conn, job, classified, settings)
 
     jobs_repo.set_stage(conn, job.id, JobStage.PERSIST)
     recipe_id = persist(conn, recipe, classified, source_url=job.input_url)
+    for media_id in media_ids:
+        media_repo.attach_to_recipe(conn, media_id, recipe_id)
+    if media_ids:
+        recipes_repo.update(conn, recipe_id, hero_media_id=media_ids[0])
     logger.info(
         "import complete",
         extra={"job_id": job.id, "recipe_id": recipe_id, "title": recipe.title},
