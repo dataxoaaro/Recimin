@@ -18,8 +18,11 @@ from recimin.db.repositories.ingredients import IngredientDraft
 from recimin.db.repositories.recipes import RecipeDraft
 from recimin.importer import caption as caption_gate
 from recimin.importer import social, web
+from recimin.importer.ingredients import alternative_positions
+from recimin.importer.ingredients import parse as parse_ingredient
 from recimin.importer.normalise import NormalisedRecipe
 from recimin.importer.urls import Classified, Platform, UrlRejected, classify
+from recimin.llm import extract as llm_extract
 from recimin.worker.loop import NonRetryable
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,7 @@ def persist(
     classified: Classified,
     *,
     source_url: str,
+    ingredient_rows: list[dict[str, object]] | None = None,
 ) -> int:
     """Write an extracted recipe as a draft.
 
@@ -40,6 +44,8 @@ def persist(
     from urllib.parse import urlsplit
 
     from recimin.db.clock import now
+
+    links = alternative_positions(recipe.ingredients)
 
     return recipes_repo.create(
         conn,
@@ -60,13 +66,28 @@ def persist(
             source_platform=SourcePlatform(str(classified.platform)),
             imported_at=now(),
         ),
-        ingredient_lines=[IngredientDraft(raw_text=line) for line in recipe.ingredients],
+        ingredient_lines=(
+            [IngredientDraft(**row) for row in ingredient_rows]  # type: ignore[arg-type]
+            if ingredient_rows is not None
+            else [
+                IngredientDraft(
+                    raw_text=line,
+                    qty=parsed.qty,
+                    unit=parsed.unit,
+                    item=parsed.item,
+                    note=parsed.note,
+                    alternative_of=links.get(position),
+                )
+                for position, line in enumerate(recipe.ingredients)
+                if (parsed := parse_ingredient(line)) is not None
+            ]
+        ),
     )
 
 
 async def _import_social(
     conn: sqlite3.Connection, job: Job, classified: Classified, settings: Settings
-) -> tuple[NormalisedRecipe, list[int]]:
+) -> tuple[NormalisedRecipe, list[int], list[dict[str, object]] | None]:
     """Fetch a social post: caption first, then media, then a draft."""
     try:
         metadata = await social.fetch_metadata(classified, settings)
@@ -96,20 +117,57 @@ async def _import_social(
     # kept: the archive is the point, and the source post may be deleted.
     jobs_repo.set_stage(conn, job.id, JobStage.MEDIA)
     files: list[Path] = []
+    rows: list[dict[str, object]] | None = None
     try:
-        files, subtitles = await social.download_media(classified, settings)
+        try:
+            files, subtitles = await social.download_media(classified, settings)
+        except social.SocialFetchFailed as error:
+            if error.needs_update:
+                raise NonRetryable(f"yt-dlp needs updating: {error}") from None
+            raise
+
         media_ids = social.store_media(
             conn, files, settings=settings, source_url=classified.normalised
         )
-    except social.SocialFetchFailed as error:
-        if error.needs_update:
-            raise NonRetryable(f"yt-dlp needs updating: {error}") from None
-        raise
+
+        # Extraction runs before cleanup: the frames come from the video file,
+        # which lives in the temp directory until the finally below.
+        recipe = social.draft_from_caption(metadata, classified, subtitles)
+
+        if settings.llm_enabled and settings.openrouter_api_key:
+            jobs_repo.set_stage(conn, job.id, JobStage.EXTRACT)
+            video = next((f for f in files if f.suffix.lower() in social.VIDEO_SUFFIXES), None)
+            try:
+                extracted = await llm_extract.from_social(
+                    caption=metadata.caption,
+                    transcript=subtitles,
+                    video=video,
+                    settings=settings,
+                )
+                recipe, rows = llm_extract.to_normalised(extracted)
+                if recipe.language == "en" and metadata.caption:
+                    # Trust our own detector over the model on this one field.
+                    recipe.language = social.draft_from_caption(metadata, classified, "").language
+                logger.info(
+                    "llm extraction applied",
+                    extra={
+                        "job_id": job.id,
+                        "ingredients": len(rows),
+                        "confidence": extracted.confidence,
+                    },
+                )
+            except (llm_extract.LlmUnavailable, llm_extract.LlmRefused) as error:
+                # A caption-only draft is still worth having: the media is
+                # archived and the user can finish it by hand.
+                logger.warning(
+                    "llm extraction skipped",
+                    extra={"job_id": job.id, "error": str(error)[:200]},
+                )
     finally:
         if files:
             await social.cleanup(files)
 
-    return social.draft_from_caption(metadata, classified, subtitles), media_ids
+    return recipe, media_ids, rows
 
 
 async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) -> int | None:
@@ -136,11 +194,12 @@ async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) 
         except web.NoRecipeFound as error:
             raise NonRetryable(str(error)) from None
         media_ids: list[int] = []
+        rows: list[dict[str, object]] | None = None
     else:
-        recipe, media_ids = await _import_social(conn, job, classified, settings)
+        recipe, media_ids, rows = await _import_social(conn, job, classified, settings)
 
     jobs_repo.set_stage(conn, job.id, JobStage.PERSIST)
-    recipe_id = persist(conn, recipe, classified, source_url=job.input_url)
+    recipe_id = persist(conn, recipe, classified, source_url=job.input_url, ingredient_rows=rows)
     for media_id in media_ids:
         media_repo.attach_to_recipe(conn, media_id, recipe_id)
     if media_ids:
