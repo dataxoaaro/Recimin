@@ -79,23 +79,75 @@ def test_rate_limit_trips_then_recovers_next_window(db: sqlite3.Connection) -> N
     limit = (3, 60)
     base = 1_000_020.0  # aligned to a 60s window boundary
 
-    assert [ratelimit.check_and_increment(db, "b", limit, now=base) for _ in range(3)] == [
-        True,
-        True,
-        True,
-    ]
-    assert ratelimit.check_and_increment(db, "b", limit, now=base) is False
+    for _ in range(3):
+        assert ratelimit.check(db, "b", limit, now=base).allowed is True
+        ratelimit.record_failure(db, "b", limit, now=base)
+
+    assert ratelimit.check(db, "b", limit, now=base).allowed is False
     # Still locked out for the rest of the window.
-    assert ratelimit.check_and_increment(db, "b", limit, now=base + 30) is False
+    assert ratelimit.check(db, "b", limit, now=base + 30).allowed is False
     # Fresh window.
-    assert ratelimit.check_and_increment(db, "b", limit, now=base + 60) is True
+    assert ratelimit.check(db, "b", limit, now=base + 60).allowed is True
 
 
 def test_rate_limit_buckets_are_independent(db: sqlite3.Connection) -> None:
     ratelimit.ensure_table(db)
     limit = (1, 60)
-    assert ratelimit.check_and_increment(db, "a", limit, now=0) is True
-    assert ratelimit.check_and_increment(db, "b", limit, now=0) is True
+    ratelimit.record_failure(db, "a", limit, now=0)
+    assert ratelimit.check(db, "a", limit, now=0).allowed is False
+    assert ratelimit.check(db, "b", limit, now=0).allowed is True
+
+
+def test_checking_never_charges_the_bucket(db: sqlite3.Connection) -> None:
+    """The old limiter incremented on every attempt, so a legitimate user was
+    locked out by their own successes and a rejected caller extended its own
+    lockout by retrying."""
+    ratelimit.ensure_table(db)
+    limit = (2, 60)
+    for _ in range(50):
+        assert ratelimit.check(db, "b", limit, now=0).allowed is True
+
+
+def test_retry_after_counts_down_to_the_window_boundary(db: sqlite3.Connection) -> None:
+    """Fixed windows reset on the boundary, not an interval after the last try,
+    so a wait quoted as the full window length would be a lie."""
+    ratelimit.ensure_table(db)
+    limit = (1, 900)
+    base = 900_000.0  # a 900s boundary
+
+    ratelimit.record_failure(db, "b", limit, now=base)
+    assert ratelimit.check(db, "b", limit, now=base).retry_after_seconds == 900
+    assert ratelimit.check(db, "b", limit, now=base + 600).retry_after_seconds == 300
+    assert ratelimit.check(db, "b", limit, now=base + 899).retry_after_seconds == 1
+
+
+def test_an_allowed_decision_quotes_no_wait(db: sqlite3.Connection) -> None:
+    ratelimit.ensure_table(db)
+    assert ratelimit.check(db, "b", (5, 60), now=0).retry_after_seconds == 0
+
+
+def test_clearing_a_bucket_forgets_its_failures(db: sqlite3.Connection) -> None:
+    ratelimit.ensure_table(db)
+    limit = (1, 60)
+    ratelimit.record_failure(db, "b", limit, now=0)
+    assert ratelimit.check(db, "b", limit, now=0).allowed is False
+
+    ratelimit.clear(db, "b")
+    assert ratelimit.check(db, "b", limit, now=0).allowed is True
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (1, "1 second"),
+        (45, "45 seconds"),
+        (90, "90 seconds"),
+        (91, "2 minutes"),
+        (3600, "60 minutes"),
+    ],
+)
+def test_wait_is_described_in_units_a_person_reads(seconds: int, expected: str) -> None:
+    assert ratelimit.describe_wait(seconds) == expected
 
 
 # ─── routes ──────────────────────────────────────────────────────────────
@@ -240,3 +292,79 @@ def test_missing_origin_passes(client: TestClient) -> None:
 
 def test_reads_are_never_origin_checked(client: TestClient) -> None:
     assert client.get("/health", headers={"Origin": "https://evil.example"}).status_code == 200
+
+
+# ─── the limiter, through the routes ─────────────────────────────────────
+
+
+def test_successful_registration_is_not_charged_to_the_limiter(client: TestClient) -> None:
+    """REGISTER_PER_IP is 10/hour and a household shares one public IP.
+
+    The old limiter incremented before validating anything, so ten legitimate
+    actions — successes included — locked the household out for the rest of the
+    hour.
+    """
+    assert _register(client).status_code == 201  # type: ignore[attr-defined]
+
+    for index in range(12):
+        response = _register(client, email=f"person{index}@example.fi")
+        assert response.status_code != 429, (  # type: ignore[attr-defined]
+            f"locked out after {index} successful registrations"
+        )
+
+
+def test_a_wrong_site_password_is_charged_and_eventually_locks_out(client: TestClient) -> None:
+    limit, _ = ratelimit.REGISTER_PER_IP
+    for _ in range(limit):
+        assert _register(client, site_password="guess").status_code == 403  # type: ignore[attr-defined]
+
+    blocked = _register(client, site_password="guess")
+    assert blocked.status_code == 429  # type: ignore[attr-defined]
+
+
+def test_a_lockout_says_when_to_come_back(client: TestClient) -> None:
+    """'Try again later' is indistinguishable from a wrong password at the UI —
+    which is exactly how it was misread in practice."""
+    limit, _ = ratelimit.REGISTER_PER_IP
+    for _ in range(limit):
+        _register(client, site_password="guess")
+
+    blocked = _register(client, site_password="guess")
+    detail = blocked.json()["detail"]  # type: ignore[attr-defined]
+    assert "Try again in" in detail
+    assert "minute" in detail or "second" in detail
+
+    retry_after = blocked.headers["Retry-After"]  # type: ignore[attr-defined]
+    assert 0 < int(retry_after) <= ratelimit.REGISTER_PER_IP[1]
+
+
+def test_a_correct_password_clears_earlier_login_failures(client: TestClient) -> None:
+    """Proving you know the credential is the strongest evidence you are not
+    the guesser the limiter exists to slow."""
+    _register(client)
+    client.post("/api/auth/logout")
+
+    limit, _ = ratelimit.LOGIN_PER_EMAIL
+    for _ in range(limit - 1):
+        client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong-password"})
+
+    good = client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+    assert good.status_code == 200
+
+    # The near-exhausted bucket is gone, so a fresh run of failures is possible.
+    client.post("/api/auth/logout")
+    again = client.post("/api/auth/login", json={"email": TEST_EMAIL, "password": "wrong-password"})
+    assert again.status_code == 401, "earlier failures were not cleared by the success"
+
+
+def test_retrying_while_locked_out_does_not_extend_the_lockout(client: TestClient) -> None:
+    limit, _ = ratelimit.REGISTER_PER_IP
+    for _ in range(limit):
+        _register(client, site_password="guess")
+
+    first = _register(client, site_password="guess")
+    for _ in range(20):
+        _register(client, site_password="guess")
+    last = _register(client, site_password="guess")
+
+    assert int(last.headers["Retry-After"]) <= int(first.headers["Retry-After"])  # type: ignore[attr-defined]

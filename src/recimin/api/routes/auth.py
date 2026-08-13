@@ -20,7 +20,24 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Deliberately identical for unknown email and wrong password, so the endpoint
 # does not confirm which addresses are registered.
 _BAD_CREDENTIALS = "Incorrect email or password"
-_TOO_MANY = "Too many attempts. Try again later."
+
+
+def _reject_if_limited(*decisions: ratelimit.Decision) -> None:
+    """Raise 429 if any bucket is exhausted, naming when the caller may retry.
+
+    Retry-After as well as prose: the header is what a client can act on, and
+    the prose is what stops the user reading a lockout as a wrong password.
+    """
+    blocked = [d for d in decisions if not d.allowed]
+    if not blocked:
+        return
+
+    wait = max(d.retry_after_seconds for d in blocked)
+    raise HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        f"Too many attempts. Try again in {ratelimit.describe_wait(wait)}.",
+        headers={"Retry-After": str(wait)},
+    )
 
 
 def _set_session_cookie(response: Response, user_id: int, settings: SettingsDep) -> None:
@@ -46,14 +63,15 @@ def register(
 ) -> UserOut:
     """Create an account. Gated by the shared site password."""
     ratelimit.ensure_table(conn)
-    if not ratelimit.check_and_increment(
-        conn, f"register:ip:{client_ip(request)}", ratelimit.REGISTER_PER_IP
-    ):
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, _TOO_MANY)
+    bucket = f"register:ip:{client_ip(request)}"
+    _reject_if_limited(ratelimit.check(conn, bucket, ratelimit.REGISTER_PER_IP))
 
     if not auth.constant_time_equals(body.site_password, settings.site_password):
+        ratelimit.record_failure(conn, bucket, ratelimit.REGISTER_PER_IP)
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Incorrect site password")
 
+    # Not charged to the limiter: reaching here means the site password was
+    # right, so this is a household member retyping an address, not a guess.
     if users_repo.get_by_email(conn, body.email) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "That email is already registered")
 
@@ -63,6 +81,7 @@ def register(
         password_hash=auth.hash_password(body.password),
         display_name=body.display_name,
     )
+    ratelimit.clear(conn, bucket)
     _set_session_cookie(response, user_id, settings)
     logger.info("user registered", extra={"user_id": user_id})
     return UserOut(id=user_id, email=body.email, display_name=body.display_name)
@@ -78,26 +97,32 @@ def login(
 ) -> UserOut:
     """Exchange credentials for a session cookie."""
     ratelimit.ensure_table(conn)
-    ip_ok = ratelimit.check_and_increment(
-        conn, f"login:ip:{client_ip(request)}", ratelimit.LOGIN_PER_IP
+    ip_bucket = f"login:ip:{client_ip(request)}"
+    email_bucket = f"login:email:{body.email.lower()}"
+    _reject_if_limited(
+        ratelimit.check(conn, ip_bucket, ratelimit.LOGIN_PER_IP),
+        ratelimit.check(conn, email_bucket, ratelimit.LOGIN_PER_EMAIL),
     )
-    email_ok = ratelimit.check_and_increment(
-        conn, f"login:email:{body.email.lower()}", ratelimit.LOGIN_PER_EMAIL
-    )
-    if not (ip_ok and email_ok):
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, _TOO_MANY)
+
+    def charge() -> None:
+        ratelimit.record_failure(conn, ip_bucket, ratelimit.LOGIN_PER_IP)
+        ratelimit.record_failure(conn, email_bucket, ratelimit.LOGIN_PER_EMAIL)
 
     user = users_repo.get_by_email(conn, body.email)
     if user is None:
         auth.dummy_verify()
+        charge()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _BAD_CREDENTIALS)
 
     if not auth.verify_password(user.password_hash, body.password):
+        charge()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _BAD_CREDENTIALS)
 
     if auth.needs_rehash(user.password_hash):
         users_repo.set_password_hash(conn, user.id, auth.hash_password(body.password))
 
+    ratelimit.clear(conn, ip_bucket)
+    ratelimit.clear(conn, email_bucket)
     _set_session_cookie(response, user.id, settings)
     return UserOut.model_validate(user)
 
