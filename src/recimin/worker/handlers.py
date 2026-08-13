@@ -23,6 +23,7 @@ from recimin.importer.ingredients import parse as parse_ingredient
 from recimin.importer.normalise import NormalisedRecipe
 from recimin.importer.urls import Classified, Platform, UrlRejected, classify
 from recimin.llm import extract as llm_extract
+from recimin.media import frames
 from recimin.worker.loop import NonRetryable
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,19 @@ async def _import_social(
             if error.needs_update:
                 raise NonRetryable(f"yt-dlp needs updating: {error}") from None
             raise
+
+        # A video cannot render in an <img>, so a clip-only post would show an
+        # empty card. Generate a poster before storing, and put it first so it
+        # becomes the hero.
+        video_file = next((f for f in files if f.suffix.lower() in social.VIDEO_SUFFIXES), None)
+        if video_file is not None and not any(
+            f.suffix.lower() in social.IMAGE_SUFFIXES for f in files
+        ):
+            poster = await frames.extract_poster(
+                video_file, video_file.with_name(f"{video_file.stem}_poster.jpg")
+            )
+            if poster is not None:
+                files = [poster, *files]
 
         media_ids = social.store_media(
             conn, files, settings=settings, source_url=classified.normalised

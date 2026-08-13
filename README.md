@@ -43,6 +43,17 @@ uv run pytest -m live
 
 ## Docker
 
+**On macOS, use the override:**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.macos.yml up -d --build
+```
+
+Docker Desktop's macOS bind mounts do not share SQLite's WAL index between
+containers, so the worker never sees jobs the api writes — silently, with no
+error. `docker-compose.macos.yml` swaps `./data` for a named volume and
+explains the whole thing. On Linux, the plain file is correct:
+
 ```bash
 docker compose up -d --build
 curl localhost:8850/health

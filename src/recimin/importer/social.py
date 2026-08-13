@@ -120,8 +120,11 @@ def store_media(
     live 33-105 hours and TikTok's exactly 48, and Instagram's expiry parameter
     is hex-encoded so it reads as the year 4000 if parsed as decimal.
     """
+    # The caller's order is meaningful: it puts a generated poster first so it
+    # becomes the hero. Sorting here would silently reorder that, and
+    # "clip.mp4" sorts before "clip_poster.jpg" because '.' < '_'.
     media_ids: list[int] = []
-    for position, path in enumerate(sorted(files)):
+    for position, path in enumerate(files):
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if mime not in store.EXTENSIONS:
             logger.info("skipping unsupported file", extra={"name": path.name, "mime": mime})

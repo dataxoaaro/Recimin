@@ -127,3 +127,43 @@ async def extract_audio(video: Path, destination: Path) -> Path | None:
         logger.info("no audio track", extra={"video": video.name, "error": str(error)[:120]})
         return None
     return destination if destination.is_file() and destination.stat().st_size > 0 else None
+
+
+async def extract_poster(video: Path, destination: Path) -> Path | None:
+    """Grab a single frame to use as the recipe's hero image.
+
+    A video cannot be rendered in an <img>, so a recipe whose only media is a
+    clip would show an empty card. Taken at 1s rather than 0s: the first frame
+    of a reel is very often black or a title card.
+
+    Generated locally rather than downloaded, following IGStore — the platform
+    thumbnail is another expiring URL, and we already have the bytes.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        seek = "1"
+        duration = await duration_seconds(video)
+        if duration < 2:
+            seek = "0"
+        await _run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-ss",
+                seek,
+                "-i",
+                str(video),
+                "-frames:v",
+                "1",
+                "-vf",
+                f"scale={FRAME_WIDTH}:-2",
+                "-q:v",
+                str(JPEG_QUALITY),
+                str(destination),
+            ],
+            timeout=60,
+        )
+    except FfmpegError as error:
+        logger.warning("poster extraction failed", extra={"error": str(error)[:200]})
+        return None
+    return destination if destination.is_file() and destination.stat().st_size > 0 else None

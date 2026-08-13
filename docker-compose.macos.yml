@@ -1,0 +1,41 @@
+# Local development on macOS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.macos.yml up -d --build
+#
+# WHY THIS EXISTS
+#
+# SQLite in WAL mode lets one process see another's commits through a shared
+# memory index, the `-shm` file, which is mmap-backed. Docker Desktop's macOS
+# bind mounts (VirtioFS / gRPC-FUSE) do not implement that sharing correctly
+# between containers.
+#
+# The symptom is nasty precisely because nothing errors: both containers open
+# the same database, both report `journal_mode=wal`, the api writes a job row
+# and reports success, and the worker's long-lived connection simply never sees
+# it. Jobs sit in `queued` forever, and restarting the worker clears them —
+# which makes it look like a polling bug rather than a filesystem one.
+#
+# Measured, 2026-08-13: with the bind mount, a second job queued after the
+# worker had processed a first was never claimed. With this named volume, both
+# were claimed within seconds and no restart was needed.
+#
+# Linux does not have this problem, so the Proxmox deployment keeps the bind
+# mount in docker-compose.yml — which also keeps `./data` rsync-able and
+# visible to vzdump.
+#
+# TRADE-OFF: the database and media now live inside the Docker VM rather than
+# in ./data. To look at them:
+#
+#   docker compose exec api ls -la /data
+#   docker compose cp api:/data/recimin.db ./recimin-local.db
+
+services:
+  api:
+    volumes:
+      - recimin-data:/data
+  worker:
+    volumes:
+      - recimin-data:/data
+
+volumes:
+  recimin-data:

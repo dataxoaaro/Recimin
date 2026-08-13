@@ -277,3 +277,31 @@ def test_live_instagram_metadata() -> None:
     assert metadata.uploader == "kinuskikissa"  # the handle, not 644361185
     assert len(metadata.caption) > 100
     assert caption.looks_like_a_recipe(metadata.caption) is False
+
+
+def test_store_media_preserves_caller_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first file becomes the recipe's hero, so order is meaningful.
+
+    Sorting here would put "clip.mp4" before "clip_poster.jpg" — '.' sorts
+    before '_' — and a video cannot render in an <img>.
+    """
+    import sqlite3
+
+    from recimin.db import schema
+    from recimin.db.connection import connect
+
+    conn: sqlite3.Connection = connect(tmp_path / "t.db")
+    schema.migrate(conn)
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42video")
+    poster = tmp_path / "clip_poster.jpg"
+    poster.write_bytes(b"\xff\xd8\xff\xe0jpegbytes\xff\xd9")
+
+    settings = SETTINGS.model_copy(update={"data_dir": tmp_path / "store"})
+    ids = social.store_media(conn, [poster, video], settings=settings, source_url="u")
+
+    first = conn.execute("SELECT kind FROM media WHERE id = ?", (ids[0],)).fetchone()
+    assert first["kind"] == "image", "the poster must come first, not the video"
