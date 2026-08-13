@@ -86,6 +86,33 @@ def persist(
     )
 
 
+async def _llm_from_page(
+    job: Job, error: web.NoRecipeFound, settings: Settings
+) -> tuple[NormalisedRecipe | None, list[dict[str, object]] | None]:
+    """Last resort for a page with no structured data."""
+    if not (settings.llm_enabled and settings.openrouter_api_key and len(error.page_text) > 200):
+        return None, None
+
+    try:
+        extracted = await llm_extract.from_web_text(error.page_text, settings)
+    except (llm_extract.LlmUnavailable, llm_extract.LlmRefused) as llm_error:
+        logger.info(
+            "llm web fallback failed",
+            extra={"job_id": job.id, "error": str(llm_error)[:200]},
+        )
+        return None, None
+
+    recipe, rows = llm_extract.to_normalised(extracted)
+    if not recipe.is_usable:
+        return None, None
+
+    logger.info(
+        "llm web fallback supplied the recipe",
+        extra={"job_id": job.id, "confidence": extracted.confidence},
+    )
+    return recipe, rows
+
+
 async def _import_social(
     conn: sqlite3.Connection, job: Job, classified: Classified, settings: Settings
 ) -> tuple[NormalisedRecipe, list[int], list[dict[str, object]] | None]:
@@ -205,10 +232,15 @@ async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) 
         try:
             # httpx is synchronous here; keep the event loop free for the API.
             recipe = await asyncio.to_thread(web.extract, classified.normalised, settings)
+            rows: list[dict[str, object]] | None = None
         except web.NoRecipeFound as error:
-            raise NonRetryable(str(error)) from None
-        media_ids: list[int] = []
-        rows: list[dict[str, object]] | None = None
+            # Structured data found nothing. The page may still be a recipe
+            # written as prose, so spend one LLM call on the readable text
+            # before giving up — but only if there is text worth sending.
+            recipe, rows = await _llm_from_page(job, error, settings)
+            if recipe is None:
+                raise NonRetryable(str(error)) from None
+        media_ids = []
     else:
         recipe, media_ids, rows = await _import_social(conn, job, classified, settings)
 

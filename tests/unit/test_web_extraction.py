@@ -19,6 +19,7 @@ from recimin.importer.normalise import (
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "pages"
+SETTINGS_OK = Settings(jwt_secret="x" * 32, site_password="site-password")
 
 
 def load(name: str) -> str:
@@ -243,3 +244,39 @@ def test_live_fetch_still_passes_bot_protection(url: str, title: str) -> None:
     recipe = web.extract(url, settings)
     assert recipe.title == title
     assert recipe.ingredients
+
+
+# ─── the fallback chain ──────────────────────────────────────────────────
+
+
+def test_recipe_scrapers_is_tried_when_schema_org_finds_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from recimin.importer.normalise import NormalisedRecipe
+
+    monkeypatch.setattr(web, "fetch", lambda url, s: "<html><body>prose</body></html>")
+    monkeypatch.setattr(web, "find_recipe_node", lambda html, url: None)
+    monkeypatch.setattr(
+        web,
+        "from_recipe_scrapers",
+        lambda html, url: NormalisedRecipe(title="From the adapter", ingredients=["2 dl kermaa"]),
+    )
+
+    recipe = web.extract("https://allrecipes.com/x", SETTINGS_OK)
+    assert recipe.title == "From the adapter"
+
+
+def test_no_recipe_found_carries_the_page_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """So the caller can spend one LLM call on it without re-fetching."""
+    monkeypatch.setattr(web, "fetch", lambda url, s: load("kinuskikissa_home"))
+    monkeypatch.setattr(web, "find_recipe_node", lambda html, url: None)
+    monkeypatch.setattr(web, "from_recipe_scrapers", lambda html, url: None)
+
+    with pytest.raises(web.NoRecipeFound) as caught:
+        web.extract("https://kinuskikissa.fi/", SETTINGS_OK)
+    assert len(caught.value.page_text) > 200
+
+
+def test_recipe_scrapers_failure_is_not_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every one of its getters can raise. A missing field is not a failure."""
+    assert web.from_recipe_scrapers("<html></html>", "https://x.fi/a") is None

@@ -36,7 +36,15 @@ class FetchFailed(Exception):
 
 
 class NoRecipeFound(Exception):
-    """The page was retrieved but carries no Recipe."""
+    """The page was retrieved but carries no Recipe.
+
+    Carries the readable page text so the caller can decide whether to spend an
+    LLM call on it rather than re-fetching.
+    """
+
+    def __init__(self, message: str, *, page_text: str = "") -> None:
+        super().__init__(message)
+        self.page_text = page_text
 
 
 def build_headers(settings: Settings) -> dict[str, str]:
@@ -134,21 +142,84 @@ def readable_text(html: str, limit: int = 12_000) -> str:
     return (body.text(separator="\n", strip=True) if body else "")[:limit]
 
 
+def from_recipe_scrapers(html: str, url: str) -> NormalisedRecipe | None:
+    """Second opinion from recipe-scrapers, in wild mode.
+
+    It carries 728 site-specific adapters, none of them for a .fi domain — so
+    this does nothing for the Finnish path and exists purely for the English
+    long tail. Its own generic fallback is roughly what we already do, so this
+    only ever helps on a site it has an adapter for.
+
+    Never use its to_json(): every field is wrapped in a bare `except: pass`,
+    so it silently omits keys. And never its yields(): it Anglicises the unit,
+    turning "4-6 annosta" into "4 servings".
+    """
+    try:
+        from recipe_scrapers import scrape_html
+    except ImportError:  # pragma: no cover - dependency is declared
+        return None
+
+    try:
+        scraper = scrape_html(html, org_url=url, supported_only=False)
+    except Exception as error:
+        logger.info("recipe-scrapers declined", extra={"url": url, "error": str(error)[:200]})
+        return None
+
+    def attempt(name: str) -> object:
+        """Every getter can raise; a missing field is not a failure."""
+        try:
+            return getattr(scraper, name)()
+        except Exception:
+            return None
+
+    ingredients = attempt("ingredients") or []
+    instructions = attempt("instructions") or ""
+    title = attempt("title") or ""
+    if not (title and (ingredients or instructions)):
+        return None
+
+    from recimin.importer.normalise import clean_text, clean_title
+
+    steps = [clean_text(line) for line in str(instructions).split("\n") if clean_text(line)]
+    return NormalisedRecipe(
+        title=clean_title(title),
+        ingredients=[clean_text(line) for line in ingredients if clean_text(line)],
+        instructions_md="\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1)),
+        total_time_minutes=attempt("total_time") or None,
+        image_url=attempt("image") or None,
+        author=attempt("author") or None,
+    )
+
+
 def extract(url: str, settings: Settings) -> NormalisedRecipe:
     """Fetch a page and pull a recipe out of it.
 
-    Raises NoRecipeFound when the page loads but has no Recipe — the correct
-    outcome for a listing page like valio.fi/reseptihaku/ or a site root.
+    Tiered, cheapest first:
+      1. schema.org via extruct — covers 30 of 34 tested pages
+      2. recipe-scrapers, for the English long tail
+      3. give up, with the readable text attached for the LLM to try
+
+    Raises NoRecipeFound when nothing works. For a listing page like
+    valio.fi/reseptihaku/ or a site root, that is the correct outcome, and the
+    exception carries the page text so the caller can decide whether to spend
+    an LLM call on it.
     """
     html = fetch(url, settings)
+
     node = find_recipe_node(html, url)
+    recipe = from_schema_org(node) if node is not None else None
 
-    if node is None:
-        raise NoRecipeFound("No recipe found on this page. Share a specific recipe instead.")
+    if recipe is None or not recipe.is_usable:
+        fallback = from_recipe_scrapers(html, url)
+        if fallback is not None and fallback.is_usable:
+            logger.info("recipe-scrapers supplied the recipe", extra={"url": url})
+            recipe = fallback
 
-    recipe = from_schema_org(node)
-    if not recipe.is_usable:
-        raise NoRecipeFound("That page has a recipe tag but no ingredients or method.")
+    if recipe is None or not recipe.is_usable:
+        raise NoRecipeFound(
+            "No recipe found on this page. Share a specific recipe instead.",
+            page_text=readable_text(html),
+        )
 
     logger.info(
         "web recipe extracted",
