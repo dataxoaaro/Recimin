@@ -11,6 +11,10 @@ dependencies = [
     "python-multipart>=0.0.20",
     "argon2-cffi>=25.1",
     "pyjwt>=2.10",
+    "httpx>=0.28",
+    "extruct>=0.18",
+    "selectolax>=0.3",
+    "recipe-scrapers>=15.12",
 ]
 
 [project.scripts]
@@ -40,7 +44,13 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]
-ignore = ["ANN401"]
+ignore = [
+    "ANN401",
+    # En-dashes and similar are real data here: Finnish recipe sites use them
+    # in yields ("4-6 annosta") and SEO suffixes, and we match on them.
+    "RUF001",
+    "RUF002",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ANN"]
@@ -50,6 +60,11 @@ testpaths = ["tests"]
 addopts = "-m 'not live'"
 markers = [
     "live: hits the real network; excluded from the default run",
+]
+filterwarnings = [
+    # pyRdfa (a transitive dep of extruct) calls the deprecated utcnow().
+    # Not ours to fix, and it drowns out warnings that are.
+    "ignore:datetime.datetime.utcnow:DeprecationWarning:pyRdfa.*",
 ]
 asyncio_mode = "auto"
 
