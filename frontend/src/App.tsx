@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AuthProvider } from "@/lib/auth-context";
+import { CookMode } from "@/routes/CookMode";
 import { Imports } from "@/routes/Imports";
 import { Library } from "@/routes/Library";
 import { RecipeDetail } from "@/routes/RecipeDetail";
@@ -28,6 +29,7 @@ export default function App() {
           >
             <Route index element={<Library />} />
             <Route path="recipes/:id" element={<RecipeDetail />} />
+            <Route path="recipes/:id/cook" element={<CookMode />} />
             <Route path="imports" element={<Imports />} />
             <Route path="settings" element={<Settings />} />
           </Route>
