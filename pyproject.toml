@@ -1,0 +1,60 @@
+[project]
+name = "recimin"
+version = "0.1.0"
+description = "Self-hosted recipe library with web, Instagram and TikTok import"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.128",
+    "uvicorn[standard]>=0.38",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.8",
+    "python-multipart>=0.0.20",
+]
+
+[project.scripts]
+recimin = "recimin.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.0",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+    "ruff>=0.15",
+    "httpx2>=2.10.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/recimin"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = [
+    "live: hits the real network; excluded from the default run",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/recimin"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

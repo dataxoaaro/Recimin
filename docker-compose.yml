@@ -1,0 +1,37 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: recimin-api
+    ports:
+      - "8850:8000"
+    volumes:
+      - ./data:/data
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    image: recimin-worker
+    volumes:
+      - ./data:/data
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  # Optional JS-rendering sidecar for the ~3% of pages that are client-only SPAs.
+  # OFF by default. Enable with:  docker compose --profile render up -d
+  # and set RENDER_SERVICE_URL=http://render:11235 in .env.
+  render:
+    profiles: ["render"]
+    image: unclecode/crawl4ai:latest
+    shm_size: 1g
+    restart: unless-stopped
