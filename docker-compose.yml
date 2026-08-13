@@ -27,6 +27,27 @@ services:
     depends_on:
       - api
 
+  # Cloudflare Tunnel. Enabled by setting CLOUDFLARE_TUNNEL_TOKEN in .env;
+  # deploy.sh adds the profile automatically when it sees one.
+  #
+  # It joins this compose network, so the dashboard's public hostname points at
+  # http://api:8000 — the container port, not the host's 8850. Nothing inbound
+  # is opened on the LXC or the router: cloudflared dials out to Cloudflare's
+  # edge and traffic returns down that connection.
+  #
+  # The tunnel target <uuid>.cfargotunnel.com does not resolve on the public
+  # internet, which is why the DNS record has to live in a Cloudflare zone and
+  # be proxied. That is the whole reason the domain must be on Cloudflare.
+  tunnel:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      - api
+
   # Optional JS-rendering sidecar for the ~3% of pages that are client-only SPAs.
   # OFF by default. Enable with:  docker compose --profile render up -d
   # and set RENDER_SERVICE_URL=http://render:11235 in .env.
