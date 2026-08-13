@@ -5,8 +5,16 @@ on a rolling 7-day window, so a prompt tuned today could be silently reassigned
 to a different model tomorrow — unacceptable for a fixed extraction contract.
 
 `require_parameters: true` forces routing to an endpoint that actually honours
-`response_format`; without it a provider may treat the schema as a hint. `zdr`
-enforces zero data retention at the provider, not just at OpenRouter.
+`response_format`; without it a provider may treat the schema as a hint.
+
+`data_collection: "deny"` refuses providers that train on what we send. Note it
+is NOT the same as `zdr: true`, which additionally demands the provider retain
+nothing at rest — Google's Gemini endpoints publish no data policy at all, so
+OpenRouter cannot certify ZDR for them and that filter matches zero endpoints.
+OpenRouter itself is zero-retention by default; prompt logging is opt-in.
+
+Worth keeping in proportion: what gets sent is frames and the caption from a
+*public* social post, not anything of the user's.
 """
 
 import base64
@@ -58,6 +66,8 @@ def build_payload(
     system: str,
     text: str,
     images: list[Path],
+    *,
+    reasoning_effort: str = "medium",
 ) -> dict[str, object]:
     """Assemble a chat-completions request."""
     content: list[dict[str, object]] = [{"type": "text", "text": text}]
@@ -69,11 +79,17 @@ def build_payload(
             {"role": "system", "content": system},
             {"role": "user", "content": content},
         ],
-        "provider": {"require_parameters": True, "zdr": True},
+        "provider": {"require_parameters": True, "data_collection": "deny"},
         "response_format": {
             "type": "json_schema",
             "json_schema": {"name": "recipe", "strict": True, "schema": json_schema()},
         },
+        # Gemini's thinking level. Medium is Google's own default and the right
+        # fit: this is a first-pass accuracy task, not hard reasoning. Sent
+        # explicitly so a change to the provider default cannot quietly move
+        # our token bill. Both pinned models advertise reasoning_effort, so
+        # require_parameters will not route us away over it.
+        "reasoning": {"effort": reasoning_effort},
         "temperature": 0,
         "max_tokens": 4000,
     }
@@ -104,6 +120,7 @@ async def extract(
         system,
         text,
         images or [],
+        reasoning_effort=settings.openrouter_reasoning_effort,
     )
     headers = {
         "Authorization": f"Bearer {settings.openrouter_api_key}",

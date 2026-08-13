@@ -78,9 +78,14 @@ def test_payload_pins_the_model_and_lists_a_fallback() -> None:
 
 
 def test_payload_requires_a_schema_honouring_endpoint() -> None:
-    """Structured-output support is per endpoint, not per model."""
+    """Structured-output support is per endpoint, not per model.
+
+    data_collection:"deny" rather than zdr:true — Gemini's endpoints publish no
+    data policy, so OpenRouter cannot certify zero retention and that stricter
+    filter matches nothing at all.
+    """
     payload = client.build_payload("m", None, "sys", "text", [])
-    assert payload["provider"] == {"require_parameters": True, "zdr": True}
+    assert payload["provider"] == {"require_parameters": True, "data_collection": "deny"}
     assert payload["response_format"]["type"] == "json_schema"  # type: ignore[index]
     assert payload["response_format"]["json_schema"]["strict"] is True  # type: ignore[index]
 
@@ -247,3 +252,31 @@ def test_prompts_tell_the_model_where_quantities_actually_live() -> None:
 def test_prompts_forbid_inventing_categories() -> None:
     for key in ("main_course", "cake", "bread"):
         assert key in prompts.SOCIAL_EXTRACTION
+
+
+def test_reasoning_effort_is_sent_explicitly() -> None:
+    """Medium is Google's default, but relying on a provider default means our
+    token bill can move without a code change."""
+    payload = client.build_payload("m", None, "s", "t", [], reasoning_effort="medium")
+    assert payload["reasoning"] == {"effort": "medium"}
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+def test_reasoning_effort_is_configurable(effort: str) -> None:
+    payload = client.build_payload("m", None, "s", "t", [], reasoning_effort=effort)
+    assert payload["reasoning"]["effort"] == effort  # type: ignore[index]
+
+
+def test_the_pinned_models_are_gemini_flash_tier() -> None:
+    """Both must advertise structured_outputs, image input and reasoning_effort.
+
+    Checked against the live catalogue on 2026-08-13. Roboflow's scene-text
+    finding is that Flash variants beat the Pro tier here, so the flagship is
+    deliberately not used.
+    """
+    from recimin.config import Settings as S
+
+    defaults = S(jwt_secret="x" * 32, site_password="site-password")
+    assert defaults.openrouter_model == "google/gemini-3.7-flash"
+    assert defaults.openrouter_model_fallback == "google/gemini-3.5-flash-lite"
+    assert defaults.openrouter_reasoning_effort == "medium"

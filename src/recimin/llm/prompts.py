@@ -6,6 +6,9 @@ _SHARED_RULES = f"""
 Rules that apply to everything you return:
 
 CATEGORY. Choose exactly one of: {", ".join(CATEGORY_KEYS)}.
+Pick the MOST SPECIFIC one that fits, not the safest. A cheesecake is "cake",
+not "dessert" and certainly not "main_course". Only use "main_course" for an
+actual main course.
 TAGS. At most 6, chosen from: {", ".join(SUGGESTED_TAGS)}. Omit rather than invent.
 LANGUAGE. "fi" if the recipe is in Finnish, otherwise "en". Do not translate.
 

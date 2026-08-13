@@ -40,8 +40,14 @@ class Settings(BaseSettings):
     # LLM
     llm_enabled: bool = True
     openrouter_api_key: str = ""
-    openrouter_model: str = "google/gemini-3.1-flash-lite"
-    openrouter_model_fallback: str = "qwen/qwen3-vl-32b-instruct"
+    openrouter_model: str = "google/gemini-3.7-flash"
+    openrouter_model_fallback: str = "google/gemini-3.5-flash-lite"
+    # Gemini's thinking level. "medium" is Google's own default and the right
+    # one here: extraction is a first-pass accuracy task, not hard reasoning.
+    # "low" trades accuracy for latency; "high" spends tokens on extended
+    # thought this job does not need. Sent explicitly rather than relied on, so
+    # a change to the provider default cannot silently alter our cost.
+    openrouter_reasoning_effort: str = "medium"
 
     # Web push
     vapid_public_key: str = ""
