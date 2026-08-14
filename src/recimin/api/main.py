@@ -171,4 +171,15 @@ def create_app(
     return app
 
 
-app = create_app()
+def __getattr__(name: str) -> FastAPI:
+    """Build the app on first attribute access instead of at import.
+
+    `uvicorn recimin.api.main:app` still works — uvicorn getattrs `app` — but
+    importing this module no longer reads settings, opens the database, or
+    runs migrations as a side effect. The tests import create_app, and a
+    module-level `app = create_app()` meant every test run silently migrated
+    whatever database the developer's .env pointed at.
+    """
+    if name == "app":
+        return create_app()
+    raise AttributeError(name)
