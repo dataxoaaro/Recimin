@@ -1,0 +1,19 @@
+name: Bug report
+description: Something broken that is not an import failure
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: How you run it (compose/dev), browser or PWA, phone or desktop.

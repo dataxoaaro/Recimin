@@ -1,0 +1,27 @@
+name: Import failure
+description: A URL or photo import that failed or produced a wrong recipe
+labels: [import]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: The URL
+      description: The link you shared (leave empty for photo imports).
+      placeholder: https://www.instagram.com/p/…
+  - type: textarea
+    id: error
+    attributes:
+      label: What the Imports screen says
+      description: Open Imports in the app; copy the error line under the failed job.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: E.g. "the caption contains the full recipe", "this page has schema.org data".
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: v0.1.0
