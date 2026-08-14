@@ -31,7 +31,7 @@ Shortcuts app → **+** → add these seven actions in order.
 
 **Action 6, expanded:**
 
-- URL: `https://recimin.com/api/import`
+- URL: `https://your-domain.example/api/import` (your instance's public address)
 - Method: **POST**
 - Headers:
   - `Authorization` → `Bearer <the key from step 1>`

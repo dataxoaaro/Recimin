@@ -1,7 +1,7 @@
 """schema.org Recipe normalisation.
 
 The highest-leverage code in the project. Every defect handled here was observed
-on a live Finnish recipe page — see claudedocs/recimin-technical.md section 6.7.
+on a live Finnish recipe page — the fixtures under tests/ are the evidence.
 Do not simplify a branch away without a fixture proving it is dead.
 """
 

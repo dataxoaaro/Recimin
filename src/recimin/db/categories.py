@@ -15,7 +15,7 @@ easier judgement for it to get right — there is no longer a meaningful call to
 make between "dessert" and "sweet baking".
 
 The dot colour is used only as a small indicator beside the label, never as a
-background or as text. See claudedocs/recimin-design.md section 2.
+background or as text.
 """
 
 import re

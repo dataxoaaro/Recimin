@@ -1,22 +1,34 @@
 # Recimin
 
-A self-hosted recipe library for one household, optimised for importing recipes from web pages, Instagram and TikTok on an iPhone.
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [`claudedocs/recimin-design.md`](claudedocs/recimin-design.md) | Visual system — tokens, typography, components, layout, copy |
-| [`claudedocs/recimin-technical.md`](claudedocs/recimin-technical.md) | Architecture, schema, import pipeline, extraction, deployment |
-| [`claudedocs/recimin-implementation.md`](claudedocs/recimin-implementation.md) | Eleven phases with test criteria |
-
-**Read [Appendix A of the technical doc](claudedocs/recimin-technical.md#appendix-a--measured-constraints) before touching the fetch layer.** It lists twenty measured constraints. Most of them look like over-engineering and are not.
+A self-hosted recipe library for one household, optimised for importing
+recipes from web pages, Instagram and TikTok on an iPhone. Share a link, and a
+minute later the recipe is in the library: ingredients parsed, category
+assigned, media archived, and a push notification when it lands.
 
 ## Stack
 
-Python 3.12 / FastAPI / SQLite (WAL, no ORM) · React 19 / Vite / Tailwind v4 / shadcn-ui · Docker Compose on a Proxmox LXC behind a Cloudflare Tunnel.
+Python 3.12 / FastAPI / SQLite (WAL, no ORM) · React 19 / Vite / Tailwind v4 /
+shadcn-ui · Docker Compose, typically behind a Cloudflare Tunnel.
 
-Two services sharing one volume. `api` is slim; `worker` carries yt-dlp, gallery-dl and ffmpeg. They communicate only through the `jobs` table — no HTTP between them, no broker.
+Two services sharing one volume. `api` is slim; `worker` carries yt-dlp,
+gallery-dl and ffmpeg. They communicate only through the `jobs` table — no
+HTTP between them, no broker.
+
+## How importing works
+
+- **Web pages** are read from their schema.org structured data first (which
+  covers nearly every recipe site with zero site-specific code), then
+  recipe-scrapers, then — only if both fail — one LLM call over the readable
+  text.
+- **Instagram and TikTok** posts have their caption checked first: if it
+  already contains the recipe, nothing else needs downloading. Otherwise the
+  media is fetched and archived (source posts get deleted; the archive is the
+  point), frames are sampled from the video, and an LLM turns caption,
+  subtitles and frames into a structured recipe.
+- Extractions the model is confident in publish directly; uncertain ones are
+  flagged for a human look on the recipe page itself.
+- The LLM layer is optional. Without an OpenRouter key, web imports still work
+  via structured data and social imports save a caption draft plus the media.
 
 ## Local development
 
@@ -30,25 +42,12 @@ cd frontend && pnpm install && pnpm dev
 
 ## Configuration
 
-One `.env`, gitignored, living in this directory. `scripts/deploy.sh` uploads
-it to the server unchanged. Edit it here, never over ssh — a copy edited on the
-server looks applied and silently is not.
-
-The three values the server needs to differ on are in `docker-compose.yml`
-under `environment:`, which overrides `env_file:`:
-
-| Key | Local `.env` | Server, via compose |
-|---|---|---|
-| `DATA_DIR` | `./data` | `/data` |
-| `ALLOWED_ORIGIN` | `http://localhost:5173` | `https://recimin.com` |
-| `MAX_MEDIA_BYTES` | whatever suits the laptop | bounded by the host's 63 GB disk |
-
-Keeping them there rather than in a second env file means they are committed
-and reviewable instead of hidden in an untracked file that can drift.
-
-`deploy.sh` refuses to run — before the slow frontend build — when a key from
-`.env.example` is missing, still holds a placeholder, or when dropping
-`CLOUDFLARE_TUNNEL_TOKEN` would take the live site offline.
+One `.env`, gitignored, holding the secrets — copy `.env.example` and fill it
+in; the app refuses to start with a missing or placeholder secret. Values a
+server needs to differ on (data directory, public origin, storage cap) live in
+`docker-compose.yml` under `environment:`, which overrides `env_file:` — edit
+them there for your own instance, committed and reviewable rather than hidden
+in a second untracked file.
 
 ## Checks
 
@@ -57,7 +56,8 @@ uv run ruff format . && uv run ruff check . --fix && uv run pytest -q
 cd frontend && pnpm exec tsc --noEmit && pnpm build
 ```
 
-Live tests hit the real network and are excluded from the default run. To include them:
+Live tests hit the real network and are excluded from the default run. To
+include them:
 
 ```bash
 uv run pytest -m live
@@ -81,12 +81,20 @@ docker compose up -d --build
 curl localhost:8850/health
 ```
 
-The optional JS-rendering sidecar is off by default:
-
-```bash
-docker compose --profile render up -d
-```
-
 ## Deployment
 
-Not yet configured — Phase 11. `scripts/deploy.sh` expects `RECIMIN_HOST` and rsyncs to the LXC. **Migrations are not automatic**; apply them before deploying a schema change.
+Any Linux host that runs Docker Compose will do. The api container applies
+pending migrations as it starts, so a deploy is: sync the repo and your `.env`
+to the host, then `docker compose up -d --build`.
+
+To expose the instance without opening any inbound port, the compose file
+ships an optional Cloudflare Tunnel service: create a tunnel in the Cloudflare
+Zero Trust dashboard, point its public hostname at `http://api:8000` (the
+container, not the host port), set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, and
+start with `docker compose --profile tunnel up -d`.
+
+## Importing from an iPhone
+
+[`docs/shortcut-setup.md`](docs/shortcut-setup.md) builds the share-sheet
+Shortcut: share a post from Instagram, TikTok or Safari, and it POSTs the URL
+to your instance with a device token. The Settings screen mints the tokens.

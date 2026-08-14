@@ -27,3 +27,10 @@ backups/
 # OS
 .DS_Store
 .claude/launch.json
+
+# Private: kept on disk, never in the public repository.
+# claudedocs holds internal design/implementation notes; deploy.sh and the
+# tunnel runbook name the actual host this instance runs on.
+claudedocs/
+scripts/deploy.sh
+docs/cloudflare-tunnel.md

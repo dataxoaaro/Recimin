@@ -1,5 +1,4 @@
 -- Recimin initial schema.
--- See claudedocs/recimin-technical.md section 4.
 
 -- ─── identity ────────────────────────────────────────────────────────────
 
