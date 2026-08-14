@@ -26,8 +26,10 @@ dev = [
     "pytest>=8.4",
     "pytest-asyncio>=1.0",
     "pytest-cov>=6.0",
-    "httpx>=0.28",
     "ruff>=0.15",
+    # Nothing here imports httpx2, but starlette.testclient does — it tries
+    # `import httpx2 as httpx` first and warns on the httpx fallback. Looks
+    # dead to a grep; is not.
     "httpx2>=2.10.0",
 ]
 

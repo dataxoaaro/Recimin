@@ -54,9 +54,6 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_subject: str = ""
 
-    # Optional render sidecar. Empty means the Crawl4AI service is disabled.
-    render_service_url: str = ""
-
     @field_validator("data_dir")
     @classmethod
     def _expand(cls, value: Path) -> Path:

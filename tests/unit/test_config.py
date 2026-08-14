@@ -40,11 +40,6 @@ def test_derived_paths(tmp_path: Path) -> None:
     assert settings.media_dir == tmp_path / "media"
 
 
-def test_render_service_disabled_by_default() -> None:
-    settings = Settings(jwt_secret=VALID_SECRET, site_password="site-password")
-    assert settings.render_service_url == ""
-
-
 def test_user_agent_is_a_current_chrome_string() -> None:
     """A stale UA is the single most likely cause of a silent TikTok failure."""
     settings = Settings(jwt_secret=VALID_SECRET, site_password="site-password")
