@@ -17,6 +17,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # The poster/frame tests run the real ffprobe against fixture bytes,
+      # exactly like the worker container does.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
       - run: uv sync --locked
       - run: uv run ruff format --check .
       - run: uv run ruff check .
