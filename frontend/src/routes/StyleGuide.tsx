@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/input";
+import { useCategories } from "@/hooks/useCategories";
 import { applyTheme, readPreference, type ThemePreference } from "@/lib/theme";
 
 /**
@@ -27,22 +28,6 @@ const TOKENS = [
   "--color-danger",
 ];
 
-const CATEGORY_DOTS: [string, string][] = [
-  ["Main course", "#a8502f"],
-  ["Soup", "#c0752f"],
-  ["Salad", "#5c8f3a"],
-  ["Side dish", "#7a9a4e"],
-  ["Appetizer", "#b8843a"],
-  ["Breakfast", "#d0a83f"],
-  ["Bread", "#a07845"],
-  ["Savoury baking", "#96613a"],
-  ["Sweet baking", "#b8586e"],
-  ["Cake", "#c4557f"],
-  ["Dessert", "#8a5fa8"],
-  ["Drink", "#3a8f96"],
-  ["Sauce", "#6a6f7a"],
-];
-
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-3">
@@ -56,6 +41,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function StyleGuide() {
   const [theme, setTheme] = React.useState<ThemePreference>(readPreference);
+  // Live from the API, so the swatches cannot drift from the served vocabulary.
+  const categories = useCategories();
 
   function choose(next: ThemePreference) {
     setTheme(next);
@@ -177,8 +164,8 @@ export function StyleGuide() {
 
       <Section title="Category dots">
         <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-3">
-          {CATEGORY_DOTS.map(([label, colour]) => (
-            <div key={label} className="flex items-center gap-2 text-sm">
+          {categories.map(({ key, label, colour }) => (
+            <div key={key} className="flex items-center gap-2 text-sm">
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: colour }} />
               {label}
             </div>

@@ -15,6 +15,7 @@ export const t = {
   // actions
   save: "Save",
   saving: "Saving…",
+  adding: "Adding…",
   cancel: "Cancel",
   del: "Delete",
   edit: "Edit",
@@ -63,6 +64,13 @@ export const t = {
   passwordRule: "Password (at least 10 characters)",
   noAccount: "Do not have an account?",
   haveAccount: "Already have an account?",
+  changePassword: "Change password",
+  currentPassword: "Current password",
+  newPasswordRule: "New password (at least 10 characters)",
+  passwordChanged: "Password changed",
+
+  // imports
+  alreadySaved: "Already saved",
 
   // errors — noun plus "failed", no codes, no apology
   signInFailed: "Incorrect email or password",
@@ -70,5 +78,6 @@ export const t = {
   loadFailed: "Loading failed",
   deleteFailed: "Delete failed",
   importFailed: "Import failed",
+  wrongCurrentPassword: "Incorrect current password",
   tooManyAttempts: "Too many attempts. Try again later.",
 } as const;

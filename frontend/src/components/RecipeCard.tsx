@@ -1,12 +1,22 @@
 import { Clock, Heart } from "lucide-react";
+import * as React from "react";
 import { Link } from "react-router-dom";
 
 import { categoryColour, categoryLabel, useCategories } from "@/hooks/useCategories";
 import { t } from "@/lib/strings";
 import type { RecipeSummary } from "@/lib/types";
 
-/** A library grid tile. The whole card is one tap target. */
-export function RecipeCard({ recipe }: { recipe: RecipeSummary }) {
+/**
+ * A library grid tile. The whole card is one tap target.
+ *
+ * Memoised: Library re-renders on every search keystroke, and until the
+ * debounce fires the recipe objects are unchanged.
+ */
+export const RecipeCard = React.memo(function RecipeCard({
+  recipe,
+}: {
+  recipe: RecipeSummary;
+}) {
   const categories = useCategories();
 
   return (
@@ -69,4 +79,4 @@ export function RecipeCard({ recipe }: { recipe: RecipeSummary }) {
       </div>
     </Link>
   );
-}
+});

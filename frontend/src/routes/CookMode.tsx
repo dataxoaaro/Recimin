@@ -3,11 +3,11 @@ import * as React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { useApiData } from "@/hooks/useApiData";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { api } from "@/lib/api";
 import { deriveSteps, scaleLine } from "@/lib/steps";
 import { t } from "@/lib/strings";
-import type { Recipe } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,19 +18,18 @@ import { cn } from "@/lib/utils";
 export function CookMode() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [recipe, setRecipe] = React.useState<Recipe | null>(null);
   const [index, setIndex] = React.useState(0);
   const [showIngredients, setShowIngredients] = React.useState(true);
   const [servings, setServings] = React.useState<number | null>(null);
 
+  const fetcher = React.useCallback(() => api.getRecipe(Number(id)), [id]);
+  const { data: recipe, error } = useApiData(fetcher);
+
   useWakeLock(recipe !== null);
 
   React.useEffect(() => {
-    api.getRecipe(Number(id)).then((loaded) => {
-      setRecipe(loaded);
-      setServings(loaded.servings);
-    });
-  }, [id]);
+    if (recipe) setServings(recipe.servings);
+  }, [recipe]);
 
   const steps = React.useMemo(
     () => (recipe ? deriveSteps(recipe.instructions_md) : []),
@@ -47,6 +46,9 @@ export function CookMode() {
     return () => document.removeEventListener("keydown", onKey);
   }, [navigate, steps.length]);
 
+  if (error) {
+    return <p className="p-4 text-[var(--color-danger)]">{error}</p>;
+  }
   if (!recipe) {
     return <p className="p-4 text-[var(--color-muted)]">{t.loading}</p>;
   }
@@ -70,39 +72,41 @@ export function CookMode() {
 
       {recipe.ingredients.length > 0 && (
         <div className="shrink-0 border-b border-[var(--color-border)]">
-          <button
-            onClick={() => setShowIngredients((open) => !open)}
-            className="flex min-h-12 w-full items-center justify-between px-4 text-sm font-semibold tracking-wide text-[var(--color-muted)] uppercase"
-          >
-            Ingredients
-            <span className="flex items-center gap-2">
-              {recipe.servings != null && servings != null && (
-                <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Fewer servings"
-                    onClick={() => setServings(Math.max(1, servings - 1))}
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[var(--color-border)]"
-                  >
-                    −
-                  </span>
-                  <span className="w-8 text-center text-base text-[var(--color-fg)]">
-                    {servings}
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label="More servings"
-                    onClick={() => setServings(servings + 1)}
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[var(--color-border)]"
-                  >
-                    +
-                  </span>
+          {/* The stepper sits beside the toggle, not inside it: interactive
+              content nested in a button is invalid HTML and the spans were
+              focusable but not keyboard-operable. */}
+          <div className="flex items-center">
+            <button
+              onClick={() => setShowIngredients((open) => !open)}
+              aria-expanded={showIngredients}
+              className="flex min-h-12 min-w-0 flex-1 items-center px-4 text-sm font-semibold tracking-wide text-[var(--color-muted)] uppercase"
+            >
+              Ingredients
+            </button>
+            {recipe.servings != null && servings != null && (
+              <span className="flex items-center gap-1 pr-4">
+                <button
+                  type="button"
+                  aria-label="Fewer servings"
+                  onClick={() => setServings(Math.max(1, servings - 1))}
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[var(--color-border)]"
+                >
+                  −
+                </button>
+                <span className="w-8 text-center text-base text-[var(--color-fg)]">
+                  {servings}
                 </span>
-              )}
-            </span>
-          </button>
+                <button
+                  type="button"
+                  aria-label="More servings"
+                  onClick={() => setServings(servings + 1)}
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[var(--color-border)]"
+                >
+                  +
+                </button>
+              </span>
+            )}
+          </div>
           {showIngredients && (
             <ul className="max-h-40 overflow-y-auto px-4 pb-3">
               {recipe.ingredients.map((line) => (

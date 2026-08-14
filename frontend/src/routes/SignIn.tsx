@@ -1,18 +1,23 @@
 import * as React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { t } from "@/lib/strings";
 
 export function SignIn() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+
+  // AuthGuard records where the visitor was headed; go back there, not home.
+  const from = (location.state as { from?: string } | null)?.from ?? "/";
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -20,9 +25,11 @@ export function SignIn() {
     setError(null);
     try {
       await signIn(email, password);
-      navigate("/", { replace: true });
-    } catch {
-      setError(t.signInFailed);
+      navigate(from, { replace: true });
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError && caught.status === 429 ? t.tooManyAttempts : t.signInFailed,
+      );
     } finally {
       setBusy(false);
     }

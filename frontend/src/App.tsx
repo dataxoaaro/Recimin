@@ -22,6 +22,9 @@ const CookMode = React.lazy(() =>
   import("@/routes/CookMode").then((m) => ({ default: m.CookMode })),
 );
 const Imports = React.lazy(() => import("@/routes/Imports").then((m) => ({ default: m.Imports })));
+const ImportShare = React.lazy(() =>
+  import("@/routes/ImportShare").then((m) => ({ default: m.ImportShare })),
+);
 const Settings = React.lazy(() =>
   import("@/routes/Settings").then((m) => ({ default: m.Settings })),
 );
@@ -58,6 +61,9 @@ export default function App() {
               <Route path="recipes/:id" element={<RecipeDetail />} />
               <Route path="recipes/:id/cook" element={<CookMode />} />
               <Route path="imports" element={<Imports />} />
+              {/* The manifest's share_target action: Android shares land here
+                  with the link in the query string. */}
+              <Route path="import" element={<ImportShare />} />
               <Route path="settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

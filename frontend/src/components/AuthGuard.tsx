@@ -15,6 +15,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       </p>
     );
   }
-  if (!user) return <Navigate to="/sign-in" replace state={{ from: location.pathname }} />;
+  // The search string matters too: a share lands on /import?url=… and must
+  // survive the sign-in round-trip intact.
+  if (!user) {
+    return (
+      <Navigate to="/sign-in" replace state={{ from: location.pathname + location.search }} />
+    );
+  }
   return <>{children}</>;
 }

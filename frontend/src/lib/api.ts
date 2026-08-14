@@ -50,6 +50,11 @@ export const api = {
     site_password: string;
   }) => request<User>("/auth/register", { method: "POST", body: json(body) }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>("/auth/change-password", {
+      method: "POST",
+      body: json({ current_password, new_password }),
+    }),
 
   categories: () => request<Category[]>("/recipes/categories"),
   listRecipes: (params: Record<string, string | boolean | undefined> = {}) => {

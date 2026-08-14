@@ -16,7 +16,7 @@ function urlBase64ToBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-export function pushSupported(): boolean {
+function pushSupported(): boolean {
   return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 

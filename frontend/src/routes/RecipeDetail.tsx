@@ -6,10 +6,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { RecipeForm } from "@/components/RecipeForm";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useApiData } from "@/hooks/useApiData";
 import { categoryColour, categoryLabel, useCategories } from "@/hooks/useCategories";
 import { api } from "@/lib/api";
 import { t } from "@/lib/strings";
-import type { Recipe } from "@/lib/types";
 
 /**
  * Full-screen, not a sheet: a recipe is a destination, not an inspection.
@@ -21,36 +21,43 @@ export function RecipeDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const categories = useCategories();
-  const [recipe, setRecipe] = React.useState<Recipe | null>(null);
-  const [error, setError] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
 
   const recipeId = Number(id);
-
-  React.useEffect(() => {
-    if (!Number.isFinite(recipeId)) return;
-    api.getRecipe(recipeId).then(setRecipe).catch(() => setError(true));
-  }, [recipeId]);
+  const fetcher = React.useCallback(
+    () =>
+      Number.isFinite(recipeId)
+        ? api.getRecipe(recipeId)
+        : Promise.reject(new Error(t.loadFailed)),
+    [recipeId],
+  );
+  const { data: recipe, error, setData: setRecipe } = useApiData(fetcher);
 
   async function onUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !recipe) return;
 
-    const body = new FormData();
-    body.append("file", file);
-    const response = await fetch(`/api/media?recipe_id=${recipe.id}`, {
-      method: "POST",
-      body,
-      credentials: "include",
-    });
-    if (!response.ok) return;
-    const { id: mediaId } = await response.json();
-    setRecipe(await api.patchRecipe(recipe.id, { hero_media_id: mediaId }));
+    setActionError(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch(`/api/media?recipe_id=${recipe.id}`, {
+        method: "POST",
+        body,
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error(t.saveFailed);
+      const { id: mediaId } = await response.json();
+      setRecipe(await api.patchRecipe(recipe.id, { hero_media_id: mediaId }));
+    } catch {
+      setActionError(t.saveFailed);
+    }
   }
 
-  if (error) return <p className="text-[var(--color-danger)]">{t.loadFailed}</p>;
+  if (error) return <p className="text-[var(--color-danger)]">{error}</p>;
   if (!recipe) return <p className="text-[var(--color-muted)]">{t.loading}</p>;
 
   const meta = [
@@ -121,6 +128,11 @@ export function RecipeDetail() {
               </span>
             ))}
           </div>
+          {recipe.description && (
+            <p className="mt-2 text-base leading-relaxed text-[var(--color-muted)]">
+              {recipe.description}
+            </p>
+          )}
         </div>
 
         {/* The way out of the flagged state. Its absence is why every imported
@@ -135,7 +147,10 @@ export function RecipeDetail() {
               size="sm"
               className="mt-2"
               onClick={() =>
-                void api.patchRecipe(recipe.id, { status: "published" }).then(setRecipe)
+                void api
+                  .patchRecipe(recipe.id, { status: "published" })
+                  .then(setRecipe)
+                  .catch(() => setActionError(t.saveFailed))
               }
             >
               <Check size={16} aria-hidden />
@@ -214,6 +229,12 @@ export function RecipeDetail() {
           </div>
         )}
 
+        {actionError && (
+          <p className="text-sm text-[var(--color-danger)]" role="alert">
+            {actionError}
+          </p>
+        )}
+
         <Button
           variant="destructive"
           className="w-full"
@@ -232,7 +253,12 @@ export function RecipeDetail() {
             variant="secondary"
             size="icon"
             aria-label={t.favourite}
-            onClick={() => void api.toggleFavourite(recipe.id).then(setRecipe)}
+            onClick={() =>
+              void api
+                .toggleFavourite(recipe.id)
+                .then(setRecipe)
+                .catch(() => setActionError(t.saveFailed))
+            }
           >
             <Heart
               size={20}
@@ -275,7 +301,13 @@ export function RecipeDetail() {
         message="This cannot be undone."
         confirmLabel={t.del}
         onCancel={() => setConfirmingDelete(false)}
-        onConfirm={() => void api.deleteRecipe(recipe.id).then(() => navigate("/"))}
+        onConfirm={() => {
+          setConfirmingDelete(false);
+          void api
+            .deleteRecipe(recipe.id)
+            .then(() => navigate("/"))
+            .catch(() => setActionError(t.deleteFailed));
+        }}
       />
     </div>
   );

@@ -5,9 +5,9 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api, ApiError } from "@/lib/api";
+import { useApiData } from "@/hooks/useApiData";
+import { api } from "@/lib/api";
 import { t } from "@/lib/strings";
-import type { Job } from "@/lib/types";
 
 const POLL_MS = 3000;
 const ACTIVE = new Set(["queued", "running"]);
@@ -37,42 +37,32 @@ function hostOf(url: string): string {
 }
 
 export function Imports() {
-  const [jobs, setJobs] = React.useState<Job[] | null>(null);
+  const { data: jobs, error: loadError, reload } = useApiData(api.listJobs);
   const [url, setUrl] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [duplicateOf, setDuplicateOf] = React.useState<number | null>(null);
 
-  const load = React.useCallback(() => api.listJobs().then(setJobs).catch(() => {}), []);
-
+  // Poll only while something is in flight, then stop. The dependency is a
+  // boolean, so identical payloads (and reload's stable identity) leave the
+  // interval alone instead of tearing it down every tick.
+  const polling = jobs?.some((job) => ACTIVE.has(job.status)) ?? false;
   React.useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Poll only while something is in flight, then stop.
-  React.useEffect(() => {
-    if (!jobs?.some((job) => ACTIVE.has(job.status))) return;
-    const timer = setInterval(() => void load(), POLL_MS);
+    if (!polling) return;
+    const timer = setInterval(() => void reload(), POLL_MS);
     return () => clearInterval(timer);
-  }, [jobs, load]);
+  }, [polling, reload]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setDuplicateOf(null);
     try {
-      await fetch("/api/import", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      }).then(async (response) => {
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new ApiError(response.status, body.detail ?? t.importFailed);
-        }
-      });
+      const result = await api.queueImport(url);
+      if (result.duplicate && result.recipe_id != null) setDuplicateOf(result.recipe_id);
       setUrl("");
-      await load();
+      await reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t.importFailed);
     } finally {
@@ -101,7 +91,7 @@ export function Imports() {
           />
         </div>
         <Button type="submit" disabled={busy || !url.trim()}>
-          {busy ? "Adding…" : t.add}
+          {busy ? t.adding : t.add}
         </Button>
       </form>
 
@@ -111,7 +101,17 @@ export function Imports() {
         </p>
       )}
 
-      {jobs === null && <p className="text-[var(--color-muted)]">{t.loading}</p>}
+      {duplicateOf != null && (
+        <p className="text-sm text-[var(--color-muted)]" role="status">
+          {t.alreadySaved}{" "}
+          <Link to={`/recipes/${duplicateOf}`} className="text-[var(--color-accent)] underline">
+            Open
+          </Link>
+        </p>
+      )}
+
+      {loadError && <p className="text-[var(--color-danger)]">{loadError}</p>}
+      {!loadError && jobs === null && <p className="text-[var(--color-muted)]">{t.loading}</p>}
       {jobs?.length === 0 && (
         <EmptyState
           title="No imports yet"
@@ -146,10 +146,10 @@ export function Imports() {
                   variant="secondary"
                   size="sm"
                   onClick={() =>
-                    void fetch(`/api/imports/${job.id}/retry`, {
-                      method: "POST",
-                      credentials: "include",
-                    }).then(load)
+                    void api
+                      .retryJob(job.id)
+                      .then(() => reload())
+                      .catch(() => setError(t.importFailed))
                   }
                 >
                   <RefreshCw size={16} aria-hidden />

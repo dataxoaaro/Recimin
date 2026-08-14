@@ -7,9 +7,9 @@ import { RecipeCard } from "@/components/RecipeCard";
 import { RecipeForm } from "@/components/RecipeForm";
 import { EmptyState } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useApiData } from "@/hooks/useApiData";
 import { api } from "@/lib/api";
 import { t } from "@/lib/strings";
-import type { RecipeSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Debounce a value so typing does not fire a request per keystroke. */
@@ -24,8 +24,6 @@ function useDebounced<T>(value: T, delay: number): T {
 
 export function Library() {
   const navigate = useNavigate();
-  const [recipes, setRecipes] = React.useState<RecipeSummary[] | null>(null);
-  const [error, setError] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState<string | null>(null);
   const [favouritesOnly, setFavouritesOnly] = React.useState(false);
@@ -33,19 +31,16 @@ export function Library() {
 
   const debouncedQuery = useDebounced(query, 250);
 
-  const load = React.useCallback(() => {
-    setError(false);
-    api
-      .listRecipes({
+  const fetcher = React.useCallback(
+    () =>
+      api.listRecipes({
         q: debouncedQuery || undefined,
         category: category ?? undefined,
         favourite: favouritesOnly || undefined,
-      })
-      .then(setRecipes)
-      .catch(() => setError(true));
-  }, [debouncedQuery, category, favouritesOnly]);
-
-  React.useEffect(load, [load]);
+      }),
+    [debouncedQuery, category, favouritesOnly],
+  );
+  const { data: recipes, error } = useApiData(fetcher);
 
   const filtered = debouncedQuery !== "" || category !== null || favouritesOnly;
 
@@ -92,7 +87,7 @@ export function Library() {
 
       <CategoryFilter value={category} onChange={setCategory} />
 
-      {error && <p className="text-[var(--color-danger)]">{t.loadFailed}</p>}
+      {error && <p className="text-[var(--color-danger)]">{error}</p>}
       {!error && recipes === null && <p className="text-[var(--color-muted)]">{t.loading}</p>}
 
       {recipes?.length === 0 &&
