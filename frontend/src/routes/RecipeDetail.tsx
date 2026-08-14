@@ -1,4 +1,4 @@
-import { ArrowLeft, ChefHat, Clock, Heart, ImagePlus, Pencil, Users } from "lucide-react";
+import { ArrowLeft, Check, ChefHat, Clock, Heart, ImagePlus, Pencil, Users } from "lucide-react";
 import * as React from "react";
 import Markdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -122,6 +122,27 @@ export function RecipeDetail() {
             ))}
           </div>
         </div>
+
+        {/* The way out of the flagged state. Its absence is why every imported
+            recipe used to wear the badge permanently: nothing but the edit form
+            ever wrote "published", and only as a side effect of saving. */}
+        {recipe.status === "draft" && (
+          <div className="rounded-xl border border-[var(--color-amber)] bg-[var(--color-amber)]/10 p-3">
+            <p className="text-sm font-medium">{t.reviewTitle}</p>
+            <p className="mt-0.5 text-sm text-[var(--color-muted)]">{t.reviewBody}</p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2"
+              onClick={() =>
+                void api.patchRecipe(recipe.id, { status: "published" }).then(setRecipe)
+              }
+            >
+              <Check size={16} aria-hidden />
+              {t.reviewConfirm}
+            </Button>
+          </div>
+        )}
 
         {recipe.source_url && (
           <p className="text-xs text-[var(--color-muted)]">

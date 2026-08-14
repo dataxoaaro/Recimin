@@ -37,7 +37,12 @@ export const t = {
 
   // states
   loading: "Loading…",
-  draft: "Draft",
+  // "Check", not "Draft". The badge now marks a recipe the model was unsure
+  // about, so it should say what to do rather than name an internal state.
+  draft: "Check",
+  reviewTitle: "Read this one over",
+  reviewBody: "The importer was not confident. Check the amounts against the source.",
+  reviewConfirm: "Looks right",
 
   // library
   libraryEmptyTitle: "No recipes yet",

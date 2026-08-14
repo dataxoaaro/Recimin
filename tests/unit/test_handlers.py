@@ -54,9 +54,15 @@ def _job(conn: sqlite3.Connection, url: str) -> object:
 # ─── the web path ────────────────────────────────────────────────────────
 
 
-async def test_web_import_persists_a_draft(
+async def test_web_import_is_published_not_flagged(
     db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """schema.org is the site's own structured data, read deterministically.
+
+    Everything used to land as a draft awaiting a review screen that was never
+    built, so the badge appeared on every recipe and meant nothing. A parse that
+    inferred nothing has nothing to review.
+    """
     monkeypatch.setattr(web, "extract", lambda url, s: RECIPE)
     job = _job(db, WEB_URL)
 
@@ -64,12 +70,33 @@ async def test_web_import_persists_a_draft(
 
     recipe = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
     assert recipe is not None
-    # Always a draft: extraction is probabilistic and a human confirms it.
-    assert recipe.status is RecipeStatus.DRAFT
+    assert recipe.status is RecipeStatus.PUBLISHED
     assert recipe.title == "Perinteinen mansikkakakku"
     assert recipe.source_site == "kinuskikissa.fi"
     assert recipe.source_author == "Kinuskikissa"
     assert recipe.imported_at is not None
+
+
+@pytest.mark.parametrize(
+    ("confidence", "expected"),
+    [
+        (None, RecipeStatus.PUBLISHED),  # schema.org, deterministic
+        ("high", RecipeStatus.PUBLISHED),
+        ("medium", RecipeStatus.DRAFT),
+        ("low", RecipeStatus.DRAFT),
+    ],
+)
+def test_only_an_uncertain_extraction_is_flagged(
+    confidence: str | None, expected: RecipeStatus
+) -> None:
+    assert handlers.status_for(confidence) is expected
+
+
+def test_an_unrecognised_confidence_is_treated_as_uncertain() -> None:
+    """The value reaches us from a model. Anything unexpected should ask for a
+    human rather than quietly claim the recipe is fine."""
+    assert handlers.status_for("banana") is RecipeStatus.DRAFT
+    assert handlers.status_for("") is RecipeStatus.DRAFT
 
 
 async def test_web_import_parses_ingredients_deterministically(
