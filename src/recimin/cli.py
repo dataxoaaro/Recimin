@@ -59,32 +59,6 @@ def _user_create(args: argparse.Namespace) -> int:
     return 0
 
 
-def _vapid(_: argparse.Namespace) -> int:
-    """Generate a VAPID key pair for Web Push.
-
-    Run once per deployment and put the output in .env. Rotating the pair
-    invalidates every existing subscription, so do it deliberately.
-    """
-    import base64
-
-    from cryptography.hazmat.primitives import serialization
-    from py_vapid import Vapid01
-
-    vapid = Vapid01()
-    vapid.generate_keys()
-
-    def encode(raw: bytes) -> str:
-        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
-
-    private = vapid.private_key.private_numbers().private_value.to_bytes(32, "big")
-    public = vapid.public_key.public_bytes(
-        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
-    )
-    print(f"VAPID_PUBLIC_KEY={encode(public)}")
-    print(f"VAPID_PRIVATE_KEY={encode(private)}")
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser."""
     parser = argparse.ArgumentParser(prog="recimin", description="Recimin admin commands")
@@ -101,8 +75,6 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--name", default=None, help="display name")
     create.add_argument("--password", default=None, help="omit to be prompted")
     create.set_defaults(func=_user_create)
-
-    sub.add_parser("vapid", help="generate Web Push keys").set_defaults(func=_vapid)
 
     return parser
 

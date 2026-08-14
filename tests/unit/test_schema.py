@@ -96,7 +96,6 @@ def test_all_tables_exist(db: sqlite3.Connection) -> None:
         "tags",
         "recipe_tags",
         "jobs",
-        "push_subscriptions",
         "recipes_fts",
     } <= names
 

@@ -49,11 +49,6 @@ class Settings(BaseSettings):
     # a change to the provider default cannot silently alter our cost.
     openrouter_reasoning_effort: str = "medium"
 
-    # Web push
-    vapid_public_key: str = ""
-    vapid_private_key: str = ""
-    vapid_subject: str = ""
-
     @field_validator("data_dir")
     @classmethod
     def _expand(cls, value: Path) -> Path:

@@ -1,4 +1,3 @@
-import { Bell, Check } from "lucide-react";
 import * as React from "react";
 
 import { DeviceTokens } from "@/components/DeviceTokens";
@@ -7,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { enablePush, pushPermission } from "@/lib/push";
 import { t } from "@/lib/strings";
 import { applyTheme, readPreference, type ThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -31,7 +29,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function Settings() {
   const [theme, setTheme] = React.useState<ThemePreference>(readPreference);
-  const [permission, setPermission] = React.useState(pushPermission);
 
   function choose(next: ThemePreference) {
     setTheme(next);
@@ -61,40 +58,6 @@ export function Settings() {
             </button>
           ))}
         </div>
-      </Section>
-
-      <Section title="Notifications">
-        <Card className="p-4">
-          {permission === "unsupported" && (
-            <p className="text-sm text-[var(--color-muted)]">
-              Not available in this browser. On iPhone, add Recimin to your Home Screen first.
-            </p>
-          )}
-          {permission === "granted" && (
-            <p className="flex items-center gap-2 text-sm text-[var(--color-muted)]">
-              <Check size={16} aria-hidden className="text-[var(--color-accent)]" />
-              You will be told when an import finishes.
-            </p>
-          )}
-          {permission === "denied" && (
-            <p className="text-sm text-[var(--color-muted)]">
-              Blocked. Allow notifications for Recimin in your device settings.
-            </p>
-          )}
-          {permission === "default" && (
-            <>
-              <p className="mb-3 text-sm text-[var(--color-muted)]">
-                Get told when a shared link finishes importing.
-              </p>
-              <Button
-                onClick={() => void enablePush().then(() => setPermission(pushPermission()))}
-              >
-                <Bell size={18} aria-hidden />
-                Turn on notifications
-              </Button>
-            </>
-          )}
-        </Card>
       </Section>
 
       <Section title="Devices">

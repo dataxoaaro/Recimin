@@ -6,9 +6,9 @@
 [![React 19](https://img.shields.io/badge/react-19-61DAFB.svg)](frontend/package.json)
 
 A self-hosted recipe library for one household, optimised for importing
-recipes from web pages, Instagram and TikTok on an iPhone. Share a link, and a
-minute later the recipe is in the library: ingredients parsed, category
-assigned, media archived, and a push notification when it lands.
+recipes from web pages, Instagram and TikTok on an iPhone. Share a link, and
+moments later the recipe is in the library: ingredients parsed, category
+assigned, media archived.
 
 ## Stack
 
@@ -103,8 +103,6 @@ server, the compose file is why.
 | `OPENROUTER_MODEL` | no | `google/gemini-3.7-flash` | Primary extraction model |
 | `OPENROUTER_MODEL_FALLBACK` | no | `google/gemini-3.5-flash-lite` | Tried when the primary is unavailable |
 | `OPENROUTER_REASONING_EFFORT` | no | `medium` | `low` / `medium` / `high` |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | no | empty | Web-push keypair. Generate both with `uv run recimin vapid` |
-| `VAPID_SUBJECT` | no | empty | A `mailto:` address identifying the push sender |
 | `CLOUDFLARE_TUNNEL_TOKEN` | no | empty | Enables the optional tunnel service (`--profile tunnel`) |
 
 ## Checks
@@ -157,13 +155,11 @@ The five minutes after `docker compose up`:
 
 1. Open the site and **register** — the form asks for the site password from
    your `.env` alongside your own email and password.
-2. On the iPhone, **install the PWA**: share sheet → *Add to Home Screen*.
-   Push notifications require the installed app, not the Safari tab.
-3. In **Settings → Notifications**, enable push, so import outcomes land as
-   notifications.
-4. In **Settings → Device tokens**, mint a token for the phone. It is shown
+2. On the iPhone, **install the PWA**: share sheet → *Add to Home Screen* —
+   full-screen app instead of a Safari tab.
+3. In **Settings → Device tokens**, mint a token for the phone. It is shown
    exactly once — it goes straight into the Shortcut in the next step.
-5. Build the share-sheet Shortcut from
+4. Build the share-sheet Shortcut from
    [`docs/shortcut-setup.md`](docs/shortcut-setup.md). From then on,
    importing is: share a post → *Recimin* → done.
 

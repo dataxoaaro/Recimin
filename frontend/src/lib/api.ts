@@ -86,8 +86,4 @@ export const api = {
   createToken: (name: string) =>
     request<ApiToken & { token: string }>("/tokens", { method: "POST", body: json({ name }) }),
   revokeToken: (id: number) => request<void>(`/tokens/${id}`, { method: "DELETE" }),
-
-  pushKey: () => request<{ key: string }>("/push/key"),
-  pushSubscribe: (subscription: unknown) =>
-    request<{ id: number }>("/push/subscribe", { method: "POST", body: json(subscription) }),
 };

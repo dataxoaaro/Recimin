@@ -12,11 +12,9 @@ import logging
 import sqlite3
 from collections.abc import Awaitable, Callable
 
-from recimin import push
 from recimin.config import Settings
 from recimin.db.models import Job, JobStatus
 from recimin.db.repositories import jobs as jobs_repo
-from recimin.db.repositories import recipes as recipes_repo
 
 logger = logging.getLogger(__name__)
 
@@ -33,19 +31,6 @@ class NonRetryable(Exception):
     cases where a human has to look. Goes straight to needs_attention rather
     than burning three attempts first.
     """
-
-
-async def _notify(conn: sqlite3.Connection, settings: Settings, **kwargs: str) -> None:
-    """Send a push, swallowing anything that goes wrong.
-
-    A failed notification must never fail the import that triggered it: the
-    recipe is already saved either way. Threaded because pywebpush is a
-    synchronous HTTPS round trip per device — enough to stall the loop.
-    """
-    try:
-        await asyncio.to_thread(push.notify, conn, settings, **kwargs)  # type: ignore[arg-type]
-    except Exception:
-        logger.exception("push notification failed")
 
 
 async def run_once(conn: sqlite3.Connection, settings: Settings, handler: Handler) -> Job | None:
@@ -73,28 +58,15 @@ async def run_once(conn: sqlite3.Connection, settings: Settings, handler: Handle
     except NonRetryable as error:
         jobs_repo.fail(conn, job.id, str(error), retryable=False)
         logger.warning("job needs attention", extra={"job_id": job.id, "error": str(error)})
-        await _notify(conn, settings, title="Import failed", body=str(error)[:120], url="/imports")
     except Exception as error:
         status = jobs_repo.fail(conn, job.id, f"{type(error).__name__}: {error}")
         logger.exception("job failed", extra={"job_id": job.id, "outcome": str(status)})
         if status is JobStatus.QUEUED:
             # Exponential backoff before the retry becomes claimable again.
             await asyncio.sleep(BACKOFF_BASE_SECONDS * (2 ** (job.attempts - 1)))
-        else:
-            await _notify(
-                conn, settings, title="Import failed", body=str(error)[:120], url="/imports"
-            )
     else:
         jobs_repo.finish(conn, job.id, recipe_id=recipe_id)
         logger.info("job done", extra={"job_id": job.id, "recipe_id": recipe_id})
-        recipe = recipes_repo.get(conn, recipe_id) if recipe_id else None
-        await _notify(
-            conn,
-            settings,
-            title="Recipe saved",
-            body=recipe.title if recipe else "Import finished",
-            url=f"/recipes/{recipe_id}" if recipe_id else "/",
-        )
 
     return job
 

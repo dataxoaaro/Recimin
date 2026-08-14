@@ -58,21 +58,19 @@ Actions** → find Recimin → pin it to the top.
 
 One-off, per phone. Skip it and the whole flow feels broken.
 
-## 4. Turn on notifications
+## 4. Install the app
 
-The API answers in about 200 ms and does the real work afterwards, so the
-result arrives as a push rather than in the Shortcut.
-
-Add Recimin to the Home Screen (Safari → Share → *Add to Home Screen*), open it
-from the Home Screen icon, then **Settings → Notifications → Turn on
-notifications**. Web Push only works in an installed PWA, not in a Safari tab.
+Add Recimin to the Home Screen (Safari → Share → *Add to Home Screen*) and
+open it from the icon — a full-screen app rather than a Safari tab.
 
 ## Using it
 
 Instagram: tap the paper-plane on a reel → **Recimin**.
 TikTok: **More** on the share screen → **Recimin**.
 
-The notification arrives when the recipe is ready. Tapping it opens the draft.
+The API answers in about 200 ms and the import runs right after; by the time
+you open the app, the recipe is in the library. The **Imports** screen shows
+anything still running or needing a retry.
 
 ## Sharing with the household
 
@@ -93,4 +91,4 @@ Never post that link anywhere public.
 | Works from Safari, not Instagram | Steps 3–5 missing; the app shared text, not a URL |
 | "Could not connect" | The URL must be a real hostname with a valid certificate. Since iOS 17, App Transport Security rejects raw IP addresses, and self-signed certificates cannot be trusted. |
 | 401 | The key was revoked, or `Bearer ` is missing before it |
-| Nothing happens after the notification | Check **Imports** in the app — the job may have failed and can be retried there |
+| Shared, but no recipe appears | Check **Imports** in the app — the job may have failed and can be retried there |
