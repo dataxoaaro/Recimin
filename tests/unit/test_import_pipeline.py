@@ -18,6 +18,13 @@ from recimin.worker.loop import NonRetryable, run_forever, run_once
 IG_POST = "https://www.instagram.com/p/DWjfQTDNm_l/"
 
 
+PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 # ─── the endpoint ────────────────────────────────────────────────────────
 
 
@@ -58,6 +65,46 @@ def test_existing_recipe_reports_duplicate_rather_than_erroring(
     response = auth_client.post("/api/import", json={"url": IG_POST})
     assert response.status_code == 202
     assert response.json() == {"job_id": 0, "duplicate": True, "recipe_id": recipe_id}
+
+
+# ─── the photo endpoint ──────────────────────────────────────────────────
+
+
+def test_photos_are_stored_and_a_job_queued(
+    auth_client: TestClient, db: sqlite3.Connection
+) -> None:
+    """Images land in the store before the response, so the phone never waits
+    on the model; the job carries their ids to the worker."""
+    response = auth_client.post(
+        "/api/import/photos",
+        files=[
+            ("files", ("page1.png", PNG, "image/png")),
+            ("files", ("page2.jpg", b"\xff\xd8\xff\xe0fake-jpeg", "image/jpeg")),
+        ],
+    )
+    assert response.status_code == 202, response.text
+    job = jobs_repo.get(db, response.json()["job_id"])
+    assert job is not None
+    assert job.kind == "image"
+    assert job.status is JobStatus.QUEUED
+    assert len(job.media_ids) == 2
+
+
+def test_photo_import_requires_auth(client: TestClient) -> None:
+    response = client.post("/api/import/photos", files=[("files", ("a.png", PNG, "image/png"))])
+    assert response.status_code == 401
+
+
+def test_a_non_image_file_is_refused(auth_client: TestClient) -> None:
+    response = auth_client.post(
+        "/api/import/photos", files=[("files", ("evil.pdf", b"%PDF-", "application/pdf"))]
+    )
+    assert response.status_code == 415
+
+
+def test_too_many_photos_are_refused(auth_client: TestClient) -> None:
+    files = [("files", (f"p{i}.png", PNG, "image/png")) for i in range(9)]
+    assert auth_client.post("/api/import/photos", files=files).status_code == 422
 
 
 @pytest.mark.parametrize(

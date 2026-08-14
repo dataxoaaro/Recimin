@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Link2, Loader, RefreshCw } from "lucide-react";
+import { AlertTriangle, Camera, Check, Image, Link2, Loader, RefreshCw } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 
@@ -42,6 +42,7 @@ export function Imports() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [duplicateOf, setDuplicateOf] = React.useState<number | null>(null);
+  const photoInput = React.useRef<HTMLInputElement>(null);
 
   // Poll only while something is in flight, then stop. The dependency is a
   // boolean, so identical payloads (and reload's stable identity) leave the
@@ -62,6 +63,23 @@ export function Imports() {
       const result = await api.queueImport(url);
       if (result.duplicate && result.recipe_id != null) setDuplicateOf(result.recipe_id);
       setUrl("");
+      await reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t.importFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPhotos(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length === 0) return;
+    setBusy(true);
+    setError(null);
+    setDuplicateOf(null);
+    try {
+      await api.queuePhotoImport(files);
       await reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t.importFailed);
@@ -94,6 +112,26 @@ export function Imports() {
           {busy ? t.adding : t.add}
         </Button>
       </form>
+
+      <input
+        ref={photoInput}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        className="hidden"
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => void submitPhotos(e)}
+      />
+      <Button
+        variant="secondary"
+        className="w-full"
+        disabled={busy}
+        onClick={() => photoInput.current?.click()}
+      >
+        <Camera size={18} aria-hidden />
+        {t.importPhotos}
+      </Button>
 
       {error && (
         <p className="text-sm text-[var(--color-danger)]" role="alert">
@@ -131,7 +169,12 @@ export function Imports() {
                 className={`${STATUS_COLOUR[job.status]} ${spinning ? "animate-spin" : ""}`}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{hostOf(job.input_url)}</p>
+                <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                  {job.kind === "image" && (
+                    <Image size={14} aria-hidden className="shrink-0 text-[var(--color-muted)]" />
+                  )}
+                  {job.kind === "image" ? t.photoImport : hostOf(job.input_url)}
+                </p>
                 <p className="truncate text-xs text-[var(--color-muted)]">
                   {job.last_error ?? job.stage ?? job.status.replace("_", " ")}
                 </p>

@@ -17,9 +17,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // FormData sets its own multipart boundary; naming a Content-Type here
+  // would strip it and break the upload.
+  const jsonBody = init.body != null && !(init.body instanceof FormData);
   const response = await fetch(`/api${path}`, {
     credentials: "include",
-    headers: init.body ? { "Content-Type": "application/json" } : undefined,
+    headers: jsonBody ? { "Content-Type": "application/json" } : undefined,
     ...init,
   });
 
@@ -81,6 +84,11 @@ export const api = {
       method: "POST",
       body: json({ url }),
     }),
+  queuePhotoImport: (files: File[]) => {
+    const body = new FormData();
+    for (const file of files) body.append("files", file);
+    return request<{ job_id: number }>("/import/photos", { method: "POST", body });
+  },
 
   listTokens: () => request<ApiToken[]>("/tokens"),
   createToken: (name: string) =>

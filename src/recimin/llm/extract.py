@@ -23,7 +23,14 @@ from recimin.media import frames as frames_mod
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LlmRefused", "LlmUnavailable", "from_social", "from_web_text", "to_normalised"]
+__all__ = [
+    "LlmRefused",
+    "LlmUnavailable",
+    "from_photos",
+    "from_social",
+    "from_web_text",
+    "to_normalised",
+]
 
 
 def to_normalised(extracted: ExtractedRecipe) -> tuple[NormalisedRecipe, list[dict[str, object]]]:
@@ -65,6 +72,21 @@ def to_normalised(extracted: ExtractedRecipe) -> tuple[NormalisedRecipe, list[di
         tags=[tag for raw in extracted.tags if (tag := raw.strip().lower()) in SUGGESTED_TAG_SET],
     )
     return recipe, ingredient_rows
+
+
+async def from_photos(images: list[Path], settings: Settings) -> ExtractedRecipe:
+    """Extract from user-chosen photos or screenshots.
+
+    Unlike every other path there is no text to fall back on — the images are
+    the entire input, which is why photo import requires the model at all.
+    """
+    recipe, _ = await extract(
+        settings,
+        system=prompts.PHOTO_EXTRACTION,
+        text="(no text available; read the recipe from the images)",
+        images=images,
+    )
+    return recipe
 
 
 async def from_web_text(page_text: str, settings: Settings) -> ExtractedRecipe:

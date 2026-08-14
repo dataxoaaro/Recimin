@@ -70,6 +70,24 @@ quantities and the audio for method.
 """.strip()
 
 
+PHOTO_EXTRACTION = f"""
+You are extracting a recipe from photographs or screenshots the user chose
+themselves: a screenshot of a recipe in another app, photos of a cookbook
+page, a magazine clipping, or a handwritten card. Several images may be pages
+of the same single recipe — combine them into one, in page order.
+
+Read carefully; layout carries meaning. Ingredient lists are usually columns
+or bullet lists, and a bold line above them is usually a group label, not an
+ingredient. Handwriting is read charitably but never invented: a quantity you
+cannot make out is a null quantity with the line kept in raw_text.
+
+If the images do not contain a recipe at all, return an empty ingredients
+list, an empty instructions_md, and a confidence of "low".
+
+{_SHARED_RULES}
+""".strip()
+
+
 def user_message(caption: str, transcript: str, page_text: str) -> str:
     """Assemble the text part of the request."""
     parts = []

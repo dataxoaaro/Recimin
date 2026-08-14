@@ -71,6 +71,8 @@ export const t = {
 
   // imports
   alreadySaved: "Already saved",
+  importPhotos: "Import from photos",
+  photoImport: "Photo import",
 
   // errors — noun plus "failed", no codes, no apology
   signInFailed: "Incorrect email or password",

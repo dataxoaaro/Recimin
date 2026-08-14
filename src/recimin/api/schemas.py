@@ -162,6 +162,7 @@ class ImportAccepted(BaseModel):
 
 class JobOut(BaseModel):
     id: int
+    kind: str
     status: JobStatus
     stage: JobStage | None
     input_url: str

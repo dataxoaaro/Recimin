@@ -67,13 +67,17 @@ def status_for(confidence: str | None) -> RecipeStatus:
 def persist(
     conn: sqlite3.Connection,
     recipe: NormalisedRecipe,
-    classified: Classified,
+    classified: Classified | None,
     *,
-    source_url: str,
+    source_url: str | None,
     ingredient_rows: list[dict[str, object]] | None = None,
     confidence: str | None = None,
 ) -> int:
-    """Write an extracted recipe, flagged for review only if it warrants it."""
+    """Write an extracted recipe, flagged for review only if it warrants it.
+
+    classified is None for photo imports, which have no source URL at all —
+    they land as SourcePlatform.MANUAL with every source field empty.
+    """
     from urllib.parse import urlsplit
 
     from recimin.db.clock import now
@@ -106,11 +110,13 @@ def persist(
             language=recipe.language,
             status=status_for(confidence),
             source_url=source_url,
-            source_url_normalised=classified.normalised,
-            source_site=urlsplit(classified.normalised).hostname,
+            source_url_normalised=classified.normalised if classified else None,
+            source_site=urlsplit(classified.normalised).hostname if classified else None,
             source_author=recipe.author,
-            source_title=recipe.title,
-            source_platform=SourcePlatform(str(classified.platform)),
+            source_title=recipe.title if classified else None,
+            source_platform=(
+                SourcePlatform(str(classified.platform)) if classified else SourcePlatform.MANUAL
+            ),
             imported_at=now(),
         ),
         ingredient_lines=lines,
@@ -327,8 +333,52 @@ async def _extract_with_llm(
     return recipe, rows, extracted.confidence
 
 
+async def _import_photos(conn: sqlite3.Connection, job: Job, settings: Settings) -> Extraction:
+    """Read a recipe out of user-uploaded photos or screenshots.
+
+    The one import path that *requires* the model: there is no caption, no
+    structured data, no text at all to fall back on.
+    """
+    if not (settings.llm_enabled and settings.openrouter_api_key):
+        raise NonRetryable(
+            "Photo import needs the LLM configured: set OPENROUTER_API_KEY and LLM_ENABLED."
+        )
+
+    paths: list[Path] = []
+    for media_id in job.media_ids:
+        record = media_repo.get(conn, media_id)
+        if record is None:
+            continue
+        path = store.absolute_path(record.file_path, media_dir=settings.data_dir)
+        if path.is_file():
+            paths.append(path)
+    if not paths:
+        raise NonRetryable("The uploaded photos are no longer available.")
+
+    jobs_repo.set_stage(conn, job.id, JobStage.EXTRACT)
+    try:
+        extracted = await llm_extract.from_photos(paths, settings)
+    except llm_extract.LlmRefused as error:
+        raise NonRetryable(f"No recipe could be read from the photos: {error}") from None
+    # LlmUnavailable propagates: a provider outage is retryable.
+
+    recipe, rows = llm_extract.to_normalised(extracted)
+    if not recipe.is_usable:
+        raise NonRetryable("No recipe could be read from the photos.")
+    return Extraction(
+        recipe,
+        ingredient_rows=rows,
+        media_ids=list(job.media_ids),
+        confidence=extracted.confidence,
+    )
+
+
 async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) -> int | None:
     """Route a job to its extractor and return the resulting recipe id."""
+    if job.kind == "image":
+        extraction = await _import_photos(conn, job, settings)
+        return _finish_import(conn, job, extraction, classified=None, source_url=None)
+
     jobs_repo.set_stage(conn, job.id, JobStage.RESOLVE)
 
     try:
@@ -380,12 +430,24 @@ async def handle_import(conn: sqlite3.Connection, job: Job, settings: Settings) 
                 return existing.id
         extraction = await _import_social(conn, job, classified, metadata, settings)
 
+    return _finish_import(conn, job, extraction, classified=classified, source_url=job.input_url)
+
+
+def _finish_import(
+    conn: sqlite3.Connection,
+    job: Job,
+    extraction: Extraction,
+    *,
+    classified: Classified | None,
+    source_url: str | None,
+) -> int:
+    """Persist the extraction, attach its media, and crown the hero."""
     jobs_repo.set_stage(conn, job.id, JobStage.PERSIST)
     recipe_id = persist(
         conn,
         extraction.recipe,
         classified,
-        source_url=job.input_url,
+        source_url=source_url,
         ingredient_rows=extraction.ingredient_rows,
         confidence=extraction.confidence,
     )

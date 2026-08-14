@@ -4,6 +4,7 @@ The only channel between the api and worker containers. The api writes queued
 rows; the worker claims and advances them.
 """
 
+import json
 import sqlite3
 
 from recimin.db.clock import days_ago, now
@@ -18,15 +19,29 @@ def enqueue(
     conn: sqlite3.Connection,
     *,
     input_url: str,
+    kind: str = "import",
     normalised_url: str | None = None,
     platform: str | None = None,
     created_by: int | None = None,
+    media_ids: list[int] | None = None,
 ) -> int:
-    """Queue an import. Must be fast: the Shortcut waits on this response."""
+    """Queue an import. Must be fast: the Shortcut waits on this response.
+
+    A photo import (`kind="image"`) has no URL to speak of; input_url carries
+    a display placeholder and media_ids the already-stored images.
+    """
     cursor = conn.execute(
         "INSERT INTO jobs (kind, status, input_url, normalised_url, platform,"
-        " created_by, created_at) VALUES ('import', 'queued', ?, ?, ?, ?, ?)",
-        (input_url, normalised_url, platform, created_by, now()),
+        " created_by, created_at, media_ids) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?)",
+        (
+            kind,
+            input_url,
+            normalised_url,
+            platform,
+            created_by,
+            now(),
+            json.dumps(media_ids) if media_ids else None,
+        ),
     )
     return int(cursor.lastrowid or 0)
 

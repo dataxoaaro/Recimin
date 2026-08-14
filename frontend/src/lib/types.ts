@@ -55,6 +55,7 @@ export interface Recipe extends RecipeSummary {
 
 export interface Job {
   id: number;
+  kind: "import" | "image";
   status: "queued" | "running" | "done" | "failed" | "needs_attention";
   stage: string | null;
   input_url: string;

@@ -4,6 +4,7 @@ Frozen dataclasses, one per table. Repositories return these; nothing outside
 the db package handles a sqlite3.Row.
 """
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from enum import StrEnum
@@ -292,6 +293,8 @@ class Job:
     created_by: int | None = None
     started_at: str | None = None
     finished_at: str | None = None
+    # Photo imports only: the already-stored images the worker should read.
+    media_ids: tuple[int, ...] = ()
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Self:
@@ -311,4 +314,5 @@ class Job:
             created_by=row["created_by"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
+            media_ids=tuple(json.loads(row["media_ids"])) if row["media_ids"] else (),
         )

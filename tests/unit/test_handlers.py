@@ -210,6 +210,97 @@ async def test_an_already_imported_url_returns_the_existing_recipe(
     assert await handlers.handle_import(db, job, settings) == existing  # type: ignore[arg-type]
 
 
+# ─── the photo path ──────────────────────────────────────────────────────
+
+PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _photo_job(db: sqlite3.Connection, settings: Settings) -> object:
+    from recimin.db.models import MediaKind
+    from recimin.media import store as media_store
+
+    stored = media_store.store_bytes(PNG, "image/png", media_dir=settings.data_dir)
+    media_id = media_repo.create(
+        db,
+        kind=MediaKind.IMAGE,
+        file_path=stored.relative_path,
+        sha256=stored.sha256,
+        bytes_=stored.bytes,
+        mime=stored.mime,
+    )
+    jobs_repo.enqueue(db, input_url="photos", kind="image", media_ids=[media_id])
+    return jobs_repo.claim_next(db)
+
+
+async def test_photos_become_a_recipe_with_the_uploads_as_media(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received: dict[str, object] = {}
+
+    async def fake_extract(images: list, s: Settings) -> ExtractedRecipe:
+        received["images"] = images
+        return ExtractedRecipe(
+            title="Mummon lettutaikina",
+            language="fi",
+            category="sweet_baking",
+            ingredients=[{"raw_text": "2 dl vehnäjauhoja"}],  # type: ignore[list-item]
+            instructions_md="1. Sekoita",
+            confidence="high",
+        )
+
+    monkeypatch.setattr(llm_extract, "from_photos", fake_extract)
+    enabled = settings.model_copy(update={"llm_enabled": True, "openrouter_api_key": "k"})
+    job = _photo_job(db, settings)
+
+    recipe_id = await handlers.handle_import(db, job, enabled)  # type: ignore[arg-type]
+
+    recipe = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
+    assert recipe is not None
+    assert recipe.title == "Mummon lettutaikina"
+    assert recipe.category == "sweet_baking"
+    assert str(recipe.source_platform) == "manual"
+    assert recipe.source_url is None
+    assert recipe.hero_media_id is not None
+    hero = media_repo.get(db, recipe.hero_media_id)
+    assert hero is not None and hero.recipe_id == recipe_id
+    # The model was handed the actual stored file.
+    assert [p.name for p in received["images"]] == [hero.file_path.rsplit("/", 1)[-1]]  # type: ignore[union-attr]
+
+
+async def test_photo_import_without_the_llm_needs_attention(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The photo path has no fallback — no caption, no structured data — so a
+    missing key must say so instead of silently doing nothing."""
+
+    async def should_not_run(images: list, s: Settings) -> ExtractedRecipe:
+        raise AssertionError("called the LLM without a key")
+
+    monkeypatch.setattr(llm_extract, "from_photos", should_not_run)
+    job = _photo_job(db, settings)  # settings has no api key
+
+    with pytest.raises(NonRetryable, match="OPENROUTER_API_KEY"):
+        await handlers.handle_import(db, job, settings)  # type: ignore[arg-type]
+
+
+async def test_photos_with_no_recipe_need_attention_not_a_retry(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refuses(images: list, s: Settings) -> ExtractedRecipe:
+        raise llm_extract.LlmRefused("schema validation failed twice")
+
+    monkeypatch.setattr(llm_extract, "from_photos", refuses)
+    enabled = settings.model_copy(update={"llm_enabled": True, "openrouter_api_key": "k"})
+    job = _photo_job(db, settings)
+
+    with pytest.raises(NonRetryable, match="No recipe could be read"):
+        await handlers.handle_import(db, job, enabled)  # type: ignore[arg-type]
+
+
 # ─── short links ─────────────────────────────────────────────────────────
 
 TT_SHORT_URL = "https://vm.tiktok.com/ZM8abcDEF/"

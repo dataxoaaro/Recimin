@@ -30,10 +30,16 @@ HTTP between them, no broker.
   media is fetched and archived (source posts get deleted; the archive is the
   point), frames are sampled from the video, and an LLM turns caption,
   subtitles and frames into a structured recipe.
+- **Photos and screenshots** — upload a screenshot of a recipe, photos of a
+  cookbook page, or a handwritten card from the Imports screen, and the LLM
+  reads the recipe out of the images. Several photos are treated as pages of
+  one recipe.
 - Extractions the model is confident in publish directly; uncertain ones are
   flagged for a human look on the recipe page itself.
 - The LLM layer is optional. Without an OpenRouter key, web imports still work
   via structured data and social imports save a caption draft plus the media.
+  The one exception is photo import, which has nothing but the images to go
+  on and therefore requires the model.
 
 ## The LLM layer
 
@@ -44,11 +50,13 @@ sample video at a fixed rate and downscale each frame, which destroys exactly
 the burned-in ingredient cards the frames exist to read). Web pages only reach
 the model as a last resort, when a page has no structured data at all.
 
-**It is optional.** Leave `OPENROUTER_API_KEY` empty (or set
-`LLM_ENABLED=false`) and everything still works: web imports come from
-schema.org structured data, social imports save the caption and archive the
-media, and you finish the recipe by hand. The model adds parsing, category,
-tags and a confidence verdict — not existence.
+**It is optional** — with one exception. Leave `OPENROUTER_API_KEY` empty (or
+set `LLM_ENABLED=false`) and everything else still works: web imports come
+from schema.org structured data, social imports save the caption and archive
+the media, and you finish the recipe by hand. The model adds parsing,
+category, tags and a confidence verdict — not existence. Photo import is the
+exception: images are its entire input, so without the model it reports
+plainly that it needs one.
 
 **Configuration** happens through [OpenRouter](https://openrouter.ai), so any
 provider's models are available behind one key:

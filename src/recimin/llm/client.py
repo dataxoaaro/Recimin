@@ -52,11 +52,22 @@ class Usage:
     completion_tokens: int = 0
 
 
+# Video frames are always JPEG; photo imports also arrive as PNG (screenshots)
+# and WebP, and the data URI must say which.
+_IMAGE_MIMES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
 def _image_part(path: Path) -> dict[str, object]:
+    mime = _IMAGE_MIMES.get(path.suffix.lower(), "image/jpeg")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return {
         "type": "image_url",
-        "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
+        "image_url": {"url": f"data:{mime};base64,{encoded}"},
     }
 
 
