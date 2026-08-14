@@ -48,15 +48,20 @@ export function RecipeCard({ recipe }: { recipe: RecipeSummary }) {
         <p className="line-clamp-2 font-[family-name:var(--font-display)] text-base font-medium">
           {recipe.title}
         </p>
+        {/* The dot carries the category, not a label. In a two-column grid a
+            card is ~164px wide, which truncated "Main course" to "Main c..." —
+            worse than no word at all. The colour is the same key the filter
+            chips use, and the accessible name keeps it available to a reader. */}
         <div className="mt-1 flex items-center gap-1.5 text-sm text-[var(--color-muted)]">
           <span
             className="h-2.5 w-2.5 shrink-0 rounded-full"
             style={{ background: categoryColour(categories, recipe.category) }}
+            role="img"
+            aria-label={categoryLabel(categories, recipe.category)}
           />
-          <span className="truncate">{categoryLabel(categories, recipe.category)}</span>
           {recipe.total_time_minutes != null && (
             <>
-              <Clock size={14} aria-hidden className="ml-auto shrink-0" />
+              <Clock size={14} aria-hidden className="shrink-0" />
               <span className="shrink-0">{t.minutes(recipe.total_time_minutes)}</span>
             </>
           )}

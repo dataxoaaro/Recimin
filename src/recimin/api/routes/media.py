@@ -84,5 +84,11 @@ def serve(media_id: int, _: CurrentUser, conn: DbDep, settings: SettingsDep) -> 
     return FileResponse(
         path,
         media_type=record.mime,
-        headers={"Cache-Control": "private, max-age=300"},
+        # Immutable, not five minutes. Storage is content-addressed, so a given
+        # media id always resolves to the same bytes — editing a recipe's photo
+        # mints a new id rather than changing this one. At max-age=300 a phone
+        # on mobile data refetched every hero image on any visit five minutes
+        # apart, for bytes it already had. `private` keeps it out of the
+        # Cloudflare edge cache, which matters because the route is behind auth.
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
     )

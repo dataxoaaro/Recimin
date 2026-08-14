@@ -74,7 +74,16 @@ def test_upload_and_serve_round_trip(auth_client: TestClient) -> None:
     served = auth_client.get(f"/api/media/{media_id}")
     assert served.status_code == 200
     assert served.content == PNG
-    assert served.headers["cache-control"] == "private, max-age=300"
+
+    # Immutable is safe because storage is content-addressed: a media id maps
+    # to a sha256-derived path, so the bytes behind an id never change and a
+    # replaced photo mints a new id. At the previous max-age=300 a phone on
+    # mobile data refetched every hero image it already had.
+    cache_control = served.headers["cache-control"]
+    assert "immutable" in cache_control
+    assert "max-age=31536000" in cache_control
+    # private, so the authenticated bytes are never held in a shared cache.
+    assert cache_control.startswith("private")
 
 
 def test_upload_refuses_an_executable(auth_client: TestClient) -> None:

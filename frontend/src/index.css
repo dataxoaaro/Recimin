@@ -46,6 +46,16 @@
 @layer base {
   :root {
     color-scheme: light;
+
+    /* One source of truth for the bottom tab bar's height, because two things
+       depend on it: the bar itself, and anything floating above it. They were
+       hardcoded separately as 57px and 64px, leaving a 7px slot through which
+       scrolling content was visible between the recipe action bar and the nav. */
+    --nav-height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+
+    /* Reading measure. 170 characters per line at desktop width was the
+       measured before; 45-75 is the legible range and 2xl lands inside it. */
+    --measure: 42rem;
   }
   /* Always set by initTheme(), never absent. "system" is resolved to a
      concrete value in JS so this selector and the dark: variant agree. */

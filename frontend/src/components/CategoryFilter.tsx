@@ -2,7 +2,14 @@ import { useCategories } from "@/hooks/useCategories";
 import { t } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 
-/** Horizontally scrollable filter chips. 44px tall so they are thumbable. */
+/**
+ * Horizontally scrollable filter chips, 36px tall.
+ *
+ * Not 44: that is Apple's guidance for a primary action, and applied to a row
+ * of a dozen secondary filters it made the row read as the heaviest element on
+ * the library screen. 36px clears WCAG 2.5.8's 24px target minimum comfortably
+ * and matches what iOS itself uses for chip rows.
+ */
 export function CategoryFilter({
   value,
   onChange,
@@ -14,7 +21,7 @@ export function CategoryFilter({
 
   const chip = (active: boolean) =>
     cn(
-      "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm",
+      "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm",
       "transition-colors",
       active
         ? "border-[var(--color-accent)] bg-black/[0.05] font-medium dark:bg-white/[0.06]"

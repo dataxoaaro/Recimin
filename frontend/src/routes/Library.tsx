@@ -115,9 +115,9 @@ export function Library() {
       <button
         onClick={() => setCreating(true)}
         aria-label={t.add}
-        className="fixed right-5 bottom-24 z-10 inline-flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-accent)] text-white shadow-lg transition-colors hover:bg-[var(--color-accent-strong)]"
+        className="fixed right-5 bottom-[calc(var(--nav-height)+1rem)] z-10 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-accent)] text-white shadow-lg transition-colors hover:bg-[var(--color-accent-strong)]"
       >
-        <Plus size={28} aria-hidden />
+        <Plus size={24} aria-hidden />
       </button>
 
       <RecipeForm

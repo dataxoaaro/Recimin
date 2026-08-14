@@ -62,20 +62,25 @@ export function RecipeDetail() {
   ].filter(Boolean) as { icon: typeof Clock; text: string }[];
 
   return (
-    <div className="-mx-4 -mt-4 pb-44">
-      <div className="relative aspect-[4/3] w-full bg-[var(--color-surface)]">
+    <div className="-mx-4 -mt-4 pb-24">
+      {/* Height is capped rather than left to the aspect ratio. `aspect-[4/3]
+          w-full` scales with the window forever: at 1440px it measured 1069px,
+          taller than the viewport, so the whole first screen was an empty box.
+          With no photo it collapses to a strip — an absent image should not
+          cost a third of a phone screen. */}
+      <div className="relative w-full bg-[var(--color-surface)]">
         {recipe.hero_media_id ? (
           <img
             src={`/api/media/${recipe.hero_media_id}`}
             alt={recipe.title}
-            className="h-full w-full object-cover"
+            className="h-[min(45vh,380px)] w-full object-cover"
           />
         ) : (
           <button
             onClick={() => fileInput.current?.click()}
-            className="flex h-full w-full flex-col items-center justify-center gap-2 text-[var(--color-muted)]"
+            className="flex h-28 w-full items-center justify-center gap-2 text-[var(--color-muted)] transition-colors hover:text-[var(--color-fg)]"
           >
-            <ImagePlus size={28} aria-hidden />
+            <ImagePlus size={20} aria-hidden />
             <span className="text-sm">Add a photo</span>
           </button>
         )}
@@ -96,7 +101,7 @@ export function RecipeDetail() {
         onChange={(e) => void onUpload(e)}
       />
 
-      <div className="space-y-6 p-4">
+      <div className="mx-auto max-w-[var(--measure)] space-y-6 p-4">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold">
             {recipe.title}
@@ -137,9 +142,12 @@ export function RecipeDetail() {
             <h2 className="mb-2 text-sm font-semibold tracking-wide text-[var(--color-muted)] uppercase">
               Ingredients
             </h2>
-            <ul className="space-y-1.5">
+            {/* leading-snug over leading-relaxed: at ~64px a row only five of
+                ten ingredients fitted a phone screen, which is what made the
+                page feel oversized. A list is scanned, not read as prose. */}
+            <ul className="space-y-1">
               {recipe.ingredients.map((line) => (
-                <li key={line.position} className="text-base leading-relaxed">
+                <li key={line.position} className="text-base leading-snug">
                   {line.raw_text}
                   {line.original_text && line.original_text !== line.raw_text && (
                     <span className="block text-xs text-[var(--color-muted)]">
@@ -194,28 +202,40 @@ export function RecipeDetail() {
         </Button>
       </div>
 
-      <div className="fixed inset-x-0 bottom-16 z-10 flex items-center gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-        <Button
-          variant="secondary"
-          size="icon"
-          aria-label={t.favourite}
-          onClick={() => void api.toggleFavourite(recipe.id).then(setRecipe)}
-        >
-          <Heart
-            size={20}
-            aria-hidden
-            className={recipe.is_favourite ? "fill-[var(--color-accent)] text-[var(--color-accent)]" : ""}
-          />
-        </Button>
-        <Button variant="secondary" size="icon" aria-label={t.edit} onClick={() => setEditing(true)}>
-          <Pencil size={20} aria-hidden />
-        </Button>
-        <Button size="lg" className="flex-1" asChild>
-          <Link to={`/recipes/${recipe.id}/cook`}>
-            <ChefHat size={20} aria-hidden />
-            {t.cook}
-          </Link>
-        </Button>
+      {/* bottom is the shared nav height, not a hardcoded 16 (64px) that
+          disagreed with the nav's actual 57px and let content scroll through
+          the 7px gap between them. */}
+      <div className="fixed inset-x-0 bottom-[var(--nav-height)] z-10 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="mx-auto flex max-w-[var(--measure)] items-center gap-3 p-3">
+          <Button
+            variant="secondary"
+            size="icon"
+            aria-label={t.favourite}
+            onClick={() => void api.toggleFavourite(recipe.id).then(setRecipe)}
+          >
+            <Heart
+              size={20}
+              aria-hidden
+              className={
+                recipe.is_favourite ? "fill-[var(--color-accent)] text-[var(--color-accent)]" : ""
+              }
+            />
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon"
+            aria-label={t.edit}
+            onClick={() => setEditing(true)}
+          >
+            <Pencil size={20} aria-hidden />
+          </Button>
+          <Button size="lg" className="flex-1" asChild>
+            <Link to={`/recipes/${recipe.id}/cook`}>
+              <ChefHat size={20} aria-hidden />
+              {t.cook}
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <RecipeForm
