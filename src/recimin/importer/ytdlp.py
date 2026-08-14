@@ -18,7 +18,7 @@ Three rules from Appendix A, all of which fail silently if broken:
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from recimin.config import Settings
@@ -50,10 +50,6 @@ class PostMetadata:
     caption: str
     uploader: str | None
     webpage_url: str
-    duration_s: float | None
-    thumbnails: list[str] = field(default_factory=list)
-    is_playlist: bool = False
-    entry_count: int = 0
 
 
 def base_args(settings: Settings) -> list[str]:
@@ -112,7 +108,6 @@ async def fetch_metadata(url: str, settings: Settings) -> PostMetadata:
     except json.JSONDecodeError as error:
         raise YtDlpError(f"unparseable metadata: {error}") from error
 
-    entries = data.get("entries") or []
     return PostMetadata(
         post_id=str(data.get("id") or ""),
         # NEVER data["title"]: Instagram returns "Video by <username>".
@@ -121,13 +116,9 @@ async def fetch_metadata(url: str, settings: Settings) -> PostMetadata:
         # (644361185) while `channel` is the handle (kinuskikissa) — attribution
         # should read "@kinuskikissa", not a number.
         uploader=data.get("channel") or data.get("uploader") or data.get("uploader_id"),
+        # The canonical URL, which for a short link is the redirect target —
+        # dedupe runs on this.
         webpage_url=str(data.get("webpage_url") or url),
-        duration_s=data.get("duration"),
-        thumbnails=[
-            t["url"] for t in (data.get("thumbnails") or []) if isinstance(t, dict) and t.get("url")
-        ],
-        is_playlist=bool(entries),
-        entry_count=len(entries),
     )
 
 

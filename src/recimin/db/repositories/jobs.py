@@ -6,13 +6,12 @@ rows; the worker claims and advances them.
 
 import sqlite3
 
-from recimin.db.clock import now
+from recimin.db.clock import days_ago, now
 from recimin.db.connection import transaction
 from recimin.db.models import CaptionGate, Job, JobStage, JobStatus
 
 MAX_ATTEMPTS = 3
-
-TERMINAL = frozenset({JobStatus.DONE, JobStatus.FAILED, JobStatus.NEEDS_ATTENTION})
+PRUNE_AFTER_DAYS = 30
 
 
 def enqueue(
@@ -72,20 +71,26 @@ def set_caption_gate(conn: sqlite3.Connection, job_id: int, gate: CaptionGate) -
     conn.execute("UPDATE jobs SET caption_gate = ? WHERE id = ?", (str(gate), job_id))
 
 
-def finish(
-    conn: sqlite3.Connection,
-    job_id: int,
-    *,
-    recipe_id: int | None = None,
-    normalised_url: str | None = None,
-    platform: str | None = None,
+def set_resolved(
+    conn: sqlite3.Connection, job_id: int, *, normalised_url: str, platform: str
 ) -> None:
+    """Record the canonical URL a short link resolved to, and its platform.
+
+    Written as soon as the worker learns it, so the Imports screen shows the
+    real post rather than an opaque vm.tiktok.com token.
+    """
+    conn.execute(
+        "UPDATE jobs SET normalised_url = ?, platform = ? WHERE id = ?",
+        (normalised_url, platform, job_id),
+    )
+
+
+def finish(conn: sqlite3.Connection, job_id: int, *, recipe_id: int | None = None) -> None:
     """Mark a job done."""
     conn.execute(
         "UPDATE jobs SET status = 'done', stage = NULL, finished_at = ?, recipe_id = ?,"
-        " normalised_url = coalesce(?, normalised_url),"
-        " platform = coalesce(?, platform), last_error = NULL WHERE id = ?",
-        (now(), recipe_id, normalised_url, platform, job_id),
+        " last_error = NULL WHERE id = ?",
+        (now(), recipe_id, job_id),
     )
 
 
@@ -148,6 +153,22 @@ def reclaim_stale(conn: sqlite3.Connection) -> int:
     cursor = conn.execute(
         "UPDATE jobs SET status = 'queued', stage = NULL, started_at = NULL"
         " WHERE status = 'running'"
+    )
+    return cursor.rowcount
+
+
+def prune_terminal(conn: sqlite3.Connection, *, older_than_days: int = PRUNE_AFTER_DAYS) -> int:
+    """Delete done and failed jobs whose outcome is old news.
+
+    Called at worker startup. Nothing else ever removed jobs, so the table —
+    and the Imports poll that sorts all of it — grew for the life of the
+    database. needs_attention rows are kept whatever their age: they are a
+    to-do list, not history.
+    """
+    cursor = conn.execute(
+        "DELETE FROM jobs WHERE status IN ('done', 'failed')"
+        " AND coalesce(finished_at, created_at) < ?",
+        (days_ago(older_than_days),),
     )
     return cursor.rowcount
 

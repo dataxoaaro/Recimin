@@ -172,12 +172,10 @@ def test_media_lifecycle(db: sqlite3.Connection) -> None:
     assert media_repo.find_by_sha256(db, "abcd") is not None
     assert len(media_repo.for_recipe(db, rid)) == 1
 
-    media_repo.discard(db, mid)
+    # Media rows go with their recipe; only the job history outlives it.
+    recipes_repo.delete(db, rid)
+    assert media_repo.get(db, mid) is None
     assert media_repo.total_bytes(db) == 0
-    assert media_repo.for_recipe(db, rid) == []
-    # The row survives so an import never re-downloads it.
-    assert media_repo.get(db, mid) is not None
-    assert media_repo.find_by_sha256(db, "abcd") is None
 
 
 # ─── users and tokens ────────────────────────────────────────────────────
@@ -290,7 +288,7 @@ def test_finish_records_the_recipe_and_clears_the_stage(db: sqlite3.Connection) 
     jobs_repo.claim_next(db)
     jobs_repo.set_stage(db, job_id, JobStage.EXTRACT)
     jobs_repo.set_caption_gate(db, job_id, CaptionGate.MISS)
-    jobs_repo.finish(db, job_id, recipe_id=rid, platform="instagram")
+    jobs_repo.finish(db, job_id, recipe_id=rid)
 
     job = jobs_repo.get(db, job_id)
     assert job is not None
@@ -298,7 +296,45 @@ def test_finish_records_the_recipe_and_clears_the_stage(db: sqlite3.Connection) 
     assert job.stage is None
     assert job.recipe_id == rid
     assert job.caption_gate is CaptionGate.MISS
-    assert job.platform == "instagram"
+
+
+def test_set_resolved_records_the_canonical_url(db: sqlite3.Connection) -> None:
+    """A short link's job row starts with the opaque token; the worker replaces
+    it with the real post as soon as yt-dlp reveals it."""
+    job_id = jobs_repo.enqueue(
+        db, input_url="https://vm.tiktok.com/ZM8abc/", normalised_url="https://vm.tiktok.com/ZM8abc"
+    )
+    jobs_repo.set_resolved(
+        db, job_id, normalised_url="https://tiktok.com/@cook/video/123", platform="tiktok"
+    )
+
+    job = jobs_repo.get(db, job_id)
+    assert job is not None
+    assert job.normalised_url == "https://tiktok.com/@cook/video/123"
+    assert job.platform == "tiktok"
+
+
+def test_prune_removes_only_stale_terminal_jobs(db: sqlite3.Connection) -> None:
+    """History older than the window goes; anything live or actionable stays."""
+    ancient = "2020-01-01T00:00:00Z"
+
+    done_old = jobs_repo.enqueue(db, input_url="https://a")
+    jobs_repo.finish(db, done_old)
+    failed_old = jobs_repo.enqueue(db, input_url="https://b")
+    db.execute("UPDATE jobs SET status = 'failed' WHERE id = ?", (failed_old,))
+    attention_old = jobs_repo.enqueue(db, input_url="https://c")
+    db.execute("UPDATE jobs SET status = 'needs_attention' WHERE id = ?", (attention_old,))
+    for job_id in (done_old, failed_old, attention_old):
+        db.execute("UPDATE jobs SET finished_at = ? WHERE id = ?", (ancient, job_id))
+
+    done_recent = jobs_repo.enqueue(db, input_url="https://d")
+    jobs_repo.finish(db, done_recent)
+    queued = jobs_repo.enqueue(db, input_url="https://e")
+
+    assert jobs_repo.prune_terminal(db) == 2
+
+    remaining = {job.id for job in jobs_repo.recent(db)}
+    assert remaining == {attention_old, done_recent, queued}
 
 
 def test_deleting_a_recipe_leaves_its_job_row(db: sqlite3.Connection) -> None:

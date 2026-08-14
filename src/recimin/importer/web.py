@@ -22,7 +22,7 @@ import httpx
 from selectolax.parser import HTMLParser
 
 from recimin.config import Settings
-from recimin.importer.normalise import NormalisedRecipe, from_schema_org
+from recimin.importer.normalise import NormalisedRecipe, from_schema_org, node_types
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,39 @@ def fetch(url: str, settings: Settings) -> str:
     return response.text
 
 
+# Hero images only; a page that serves its photo as anything else keeps it.
+IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
+
+
+def download_image(url: str, settings: Settings) -> tuple[bytes, str] | None:
+    """Fetch a recipe's hero image. Returns (bytes, mime), or None on any miss.
+
+    Best-effort by design: a recipe without its photo is still a recipe, so
+    nothing here is allowed to fail the import.
+    """
+    try:
+        with httpx.Client(
+            http2=False,
+            follow_redirects=True,
+            timeout=TIMEOUT,
+            headers=build_headers(settings),
+        ) as client:
+            response = client.get(url)
+    except httpx.HTTPError as error:
+        logger.info("hero image fetch failed", extra={"url": url, "error": str(error)[:200]})
+        return None
+
+    if response.status_code >= 400:
+        logger.info("hero image fetch failed", extra={"url": url, "status": response.status_code})
+        return None
+
+    mime = (response.headers.get("Content-Type") or "").partition(";")[0].strip().lower()
+    if mime not in IMAGE_MIMES:
+        logger.info("hero image has unsupported type", extra={"url": url, "mime": mime})
+        return None
+    return response.content, mime
+
+
 def iter_nodes(data: Any) -> Any:
     """Walk every dict in an arbitrarily nested structure."""
     if isinstance(data, dict):
@@ -105,11 +138,9 @@ def iter_nodes(data: Any) -> Any:
 
 def is_recipe(node: dict[str, Any]) -> bool:
     """Whether a node is a schema.org Recipe, in any @type shape."""
-    node_type = node.get("@type") or node.get("type") or ""
-    types = node_type if isinstance(node_type, list) else [node_type]
     return any(
         isinstance(entry, str) and entry.rstrip("/").rsplit("/", 1)[-1] == "Recipe"
-        for entry in types
+        for entry in node_types(node)
     )
 
 

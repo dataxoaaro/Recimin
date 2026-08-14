@@ -18,6 +18,7 @@ The dot colour is used only as a small indicator beside the label, never as a
 background or as text. See claudedocs/recimin-design.md section 2.
 """
 
+import re
 from enum import StrEnum
 from typing import NamedTuple
 
@@ -84,7 +85,9 @@ def parse_category(value: str | None) -> Category:
     if not value:
         return DEFAULT_CATEGORY
 
-    key = value.strip().lower()
+    # Spaces and hyphens become underscores so schema.org's human-facing
+    # strings ("Main course", "Side Dish") land on the same keys.
+    key = re.sub(r"[\s\-]+", "_", value.strip().lower())
     try:
         return Category(key)
     except ValueError:

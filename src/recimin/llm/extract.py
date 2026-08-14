@@ -1,8 +1,7 @@
 """Extraction orchestration.
 
-One LLM call per import, at most. Frames and audio go in the same request as
-the caption: Gemini takes audio natively at 32 tokens per second, which is
-cheaper per minute than any dedicated ASR API, and collapses a pipeline stage.
+One LLM call per import, at most. The request carries the caption, the
+subtitle transcript, and frames sampled from the video.
 
 The raw video is never sent. Gemini samples video at a fixed 1fps and charges
 70 tokens per video frame against 1,120 for an extracted image, and
@@ -15,11 +14,11 @@ import tempfile
 from pathlib import Path
 
 from recimin.config import Settings
-from recimin.importer.ingredients import alternative_positions, parse
+from recimin.importer.ingredients import parse_lines
 from recimin.importer.normalise import NormalisedRecipe
 from recimin.llm import prompts
 from recimin.llm.client import LlmRefused, LlmUnavailable, extract
-from recimin.llm.schema import ExtractedRecipe
+from recimin.llm.schema import SUGGESTED_TAG_SET, ExtractedRecipe
 from recimin.media import frames as frames_mod
 
 logger = logging.getLogger(__name__)
@@ -34,11 +33,9 @@ def to_normalised(extracted: ExtractedRecipe) -> tuple[NormalisedRecipe, list[di
     "TAI" suffix is a deterministic signal and a rule beats a hope.
     """
     raw_lines = [line.raw_text for line in extracted.ingredients]
-    links = alternative_positions(raw_lines)
 
     ingredient_rows: list[dict[str, object]] = []
-    for position, line in enumerate(extracted.ingredients):
-        fallback = parse(line.raw_text)
+    for line, (fallback, link) in zip(extracted.ingredients, parse_lines(raw_lines), strict=True):
         ingredient_rows.append(
             {
                 "raw_text": line.raw_text,
@@ -49,7 +46,7 @@ def to_normalised(extracted: ExtractedRecipe) -> tuple[NormalisedRecipe, list[di
                 "item": line.item or fallback.item,
                 "note": line.note or fallback.note,
                 "group_label": line.group_label,
-                "alternative_of": links.get(position, line.alternative_of),
+                "alternative_of": link if link is not None else line.alternative_of,
             }
         )
 
@@ -62,6 +59,10 @@ def to_normalised(extracted: ExtractedRecipe) -> tuple[NormalisedRecipe, list[di
         total_time_minutes=extracted.total_time_minutes,
         description=extracted.description,
         language=extracted.language,
+        category=extracted.category,
+        # The prompt says "omit rather than invent", but that is a hope, not a
+        # rule. Filtering to the vocabulary here is the rule.
+        tags=[tag for raw in extracted.tags if (tag := raw.strip().lower()) in SUGGESTED_TAG_SET],
     )
     return recipe, ingredient_rows
 

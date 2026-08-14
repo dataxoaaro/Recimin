@@ -183,11 +183,6 @@ async def test_a_missing_api_key_never_calls_out() -> None:
         await client.extract(keyless, system="s", text="t")
 
 
-def test_markdown_fences_are_tolerated() -> None:
-    assert client.parse_json_response('```json\n{"a": 1}\n```') == {"a": 1}
-    assert client.parse_json_response('{"a": 1}') == {"a": 1}
-
-
 # ─── conversion ──────────────────────────────────────────────────────────
 
 

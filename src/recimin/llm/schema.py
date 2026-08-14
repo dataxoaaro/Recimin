@@ -36,6 +36,8 @@ SUGGESTED_TAGS = [
     "grill",
 ]
 
+SUGGESTED_TAG_SET = frozenset(SUGGESTED_TAGS)
+
 
 class ExtractedIngredient(BaseModel):
     """One ingredient line.

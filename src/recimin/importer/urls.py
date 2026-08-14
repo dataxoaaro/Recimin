@@ -67,10 +67,6 @@ class Classified:
     needs_redirect_resolution: bool = False
 
 
-def _host(url: str) -> str:
-    return urlsplit(url).hostname or ""
-
-
 def _registrable(host: str) -> str:
     """Strip a leading www. and nothing else. Not a full PSL implementation."""
     return host.removeprefix("www.").lower()

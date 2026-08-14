@@ -160,7 +160,6 @@ def test_english_or_links_too() -> None:
 
 def test_the_suffix_is_stripped_from_the_parsed_item() -> None:
     parsed = parse("5 munan sokerikakkupohja TAI")
-    assert parsed.introduces_alternative is True
     assert parsed.item is not None
     assert not parsed.item.endswith("TAI")
     # But the displayed line keeps it, because that is what the author wrote.

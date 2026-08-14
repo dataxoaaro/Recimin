@@ -96,7 +96,6 @@ class ParsedLine:
     unit: str | None = None
     item: str | None = None
     note: str | None = None
-    introduces_alternative: bool = False
 
 
 def normalise_numeric(text: str) -> str:
@@ -154,7 +153,8 @@ def parse(raw: str) -> ParsedLine:
     if not text:
         return ParsedLine(raw_text=raw)
 
-    alternative = bool(_ALTERNATIVE_SUFFIX.search(text))
+    # The trailing "TAI"/"or" marks a choice; alternative_positions() reads it
+    # from the raw lines, so here it is only stripped out of the body.
     body = _ALTERNATIVE_SUFFIX.sub("", text).strip()
 
     # Pull out a parenthetical before matching, so "(400 g)" does not read as
@@ -189,14 +189,7 @@ def parse(raw: str) -> ParsedLine:
 
     item = " ".join(tokens[index:]).strip(" ,.") or None
 
-    return ParsedLine(
-        raw_text=raw,
-        qty=qty,
-        unit=unit,
-        item=item,
-        note=note,
-        introduces_alternative=alternative,
-    )
+    return ParsedLine(raw_text=raw, qty=qty, unit=unit, item=item, note=note)
 
 
 def alternative_positions(lines: list[str]) -> dict[int, int]:
@@ -206,3 +199,13 @@ def alternative_positions(lines: list[str]) -> dict[int, int]:
         if _ALTERNATIVE_SUFFIX.search(lines[index - 1].strip()):
             links[index] = index - 1
     return links
+
+
+def parse_lines(lines: list[str]) -> list[tuple[ParsedLine, int | None]]:
+    """Parse every line, pairing each with the position it substitutes for.
+
+    The one call both import paths share: the deterministic parse plus the
+    TAI/or linking, aligned by position.
+    """
+    links = alternative_positions(lines)
+    return [(parse(line), links.get(position)) for position, line in enumerate(lines)]

@@ -245,7 +245,6 @@ def test_draft_keeps_the_caption_and_transcript() -> None:
         caption=KINDER_CAPTION,
         uploader="kinuskikissa",
         webpage_url="https://instagram.com/p/DWjfQTDNm_l",
-        duration_s=30.0,
     )
     draft = social.draft_from_caption(
         metadata, classify("https://www.instagram.com/p/DWjfQTDNm_l/"), "Vatkaa kerma."

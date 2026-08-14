@@ -35,14 +35,15 @@ class NonRetryable(Exception):
     """
 
 
-def _notify(conn: sqlite3.Connection, settings: Settings, **kwargs: str) -> None:
+async def _notify(conn: sqlite3.Connection, settings: Settings, **kwargs: str) -> None:
     """Send a push, swallowing anything that goes wrong.
 
     A failed notification must never fail the import that triggered it: the
-    recipe is already saved either way.
+    recipe is already saved either way. Threaded because pywebpush is a
+    synchronous HTTPS round trip per device — enough to stall the loop.
     """
     try:
-        push.notify(conn, settings, **kwargs)  # type: ignore[arg-type]
+        await asyncio.to_thread(push.notify, conn, settings, **kwargs)  # type: ignore[arg-type]
     except Exception:
         logger.exception("push notification failed")
 
@@ -72,7 +73,7 @@ async def run_once(conn: sqlite3.Connection, settings: Settings, handler: Handle
     except NonRetryable as error:
         jobs_repo.fail(conn, job.id, str(error), retryable=False)
         logger.warning("job needs attention", extra={"job_id": job.id, "error": str(error)})
-        _notify(conn, settings, title="Import failed", body=str(error)[:120], url="/imports")
+        await _notify(conn, settings, title="Import failed", body=str(error)[:120], url="/imports")
     except Exception as error:
         status = jobs_repo.fail(conn, job.id, f"{type(error).__name__}: {error}")
         logger.exception("job failed", extra={"job_id": job.id, "outcome": str(status)})
@@ -80,12 +81,14 @@ async def run_once(conn: sqlite3.Connection, settings: Settings, handler: Handle
             # Exponential backoff before the retry becomes claimable again.
             await asyncio.sleep(BACKOFF_BASE_SECONDS * (2 ** (job.attempts - 1)))
         else:
-            _notify(conn, settings, title="Import failed", body=str(error)[:120], url="/imports")
+            await _notify(
+                conn, settings, title="Import failed", body=str(error)[:120], url="/imports"
+            )
     else:
         jobs_repo.finish(conn, job.id, recipe_id=recipe_id)
         logger.info("job done", extra={"job_id": job.id, "recipe_id": recipe_id})
         recipe = recipes_repo.get(conn, recipe_id) if recipe_id else None
-        _notify(
+        await _notify(
             conn,
             settings,
             title="Recipe saved",
@@ -110,6 +113,10 @@ async def run_forever(
     reclaimed = jobs_repo.reclaim_stale(conn)
     if reclaimed:
         logger.info("reclaimed stale jobs", extra={"count": reclaimed})
+
+    pruned = jobs_repo.prune_terminal(conn)
+    if pruned:
+        logger.info("pruned old jobs", extra={"count": pruned})
 
     while not stop.is_set():
         # run_once releases its own job on cancellation.

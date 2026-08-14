@@ -61,6 +61,15 @@ def test_parse_accepts_known_keys() -> None:
     assert parse_category("  SWEET_BAKING  ") is Category.SWEET_BAKING
 
 
+def test_parse_accepts_human_facing_forms() -> None:
+    """schema.org's recipeCategory is prose, not a key: "Main course",
+    "Side Dish", "sweet baking". Separator differences must not reroute them."""
+    assert parse_category("Main course") is Category.DINNER
+    assert parse_category("Side Dish") is Category.DINNER
+    assert parse_category("sweet baking") is Category.SWEET_BAKING
+    assert parse_category("savoury-baking") is Category.SAVOURY_BAKING
+
+
 def test_parse_degrades_rather_than_raising() -> None:
     """Extraction output is untrusted; an unknown value must not fail an import."""
     assert parse_category("pudding") is DEFAULT_CATEGORY

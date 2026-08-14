@@ -27,7 +27,7 @@ from recimin.db.models import MediaKind
 from recimin.db.repositories import media as media_repo
 from recimin.importer import caption as caption_gate
 from recimin.importer import gallerydl, ytdlp
-from recimin.importer.normalise import NormalisedRecipe
+from recimin.importer.normalise import NormalisedRecipe, looks_finnish
 from recimin.importer.urls import Classified, Platform
 from recimin.media import store
 
@@ -130,7 +130,10 @@ def store_media(
             logger.info("skipping unsupported file", extra={"name": path.name, "mime": mime})
             continue
         try:
-            stored = store.store_bytes(path.read_bytes(), mime, media_dir=settings.data_dir)
+            # Streamed, not read whole: a clip is 5-30MB and there is no reason
+            # to hold it in memory just to hash it.
+            with path.open("rb") as handle:
+                stored = store.store_stream(handle, mime, media_dir=settings.data_dir)
         except (store.MediaTooLarge, store.UnsupportedMediaType) as error:
             logger.warning("media rejected", extra={"name": path.name, "error": str(error)})
             continue
@@ -175,13 +178,8 @@ def draft_from_caption(
         ingredients=[],
         instructions_md=body,
         author=metadata.uploader,
-        language="fi" if _looks_finnish(metadata.caption) else "en",
+        language="fi" if looks_finnish(metadata.caption) else "en",
     )
-
-
-def _looks_finnish(text: str) -> bool:
-    lowered = text.lower()
-    return any(marker in lowered for marker in (" dl ", " rkl ", " tl ", "ää", "öö", "ja "))
 
 
 async def cleanup(paths: list[Path]) -> None:

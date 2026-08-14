@@ -1,4 +1,4 @@
-"""Frame and audio extraction with ffmpeg.
+"""Frame and poster extraction with ffmpeg.
 
 Fixed-interval sampling, not scene detection. Instagram's default text-card
 duration is 5 seconds and creator guidance says 2 seconds minimum, so an even
@@ -97,36 +97,6 @@ async def extract_frames(video: Path, destination: Path, *, count: int = FRAME_C
         extra={"video": video.name, "duration_s": round(duration, 1), "frames": len(frames)},
     )
     return frames
-
-
-async def extract_audio(video: Path, destination: Path) -> Path | None:
-    """Pull a 16 kHz mono track, or None when the clip is silent.
-
-    Gemini accepts audio natively at 32 tokens per second — a 60-second clip is
-    1,920 tokens, cheaper per minute than any dedicated ASR API.
-    """
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        await _run(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-i",
-                str(video),
-                "-vn",
-                "-ac",
-                "1",
-                "-ar",
-                "16000",
-                "-b:a",
-                "64k",
-                str(destination),
-            ]
-        )
-    except FfmpegError as error:
-        logger.info("no audio track", extra={"video": video.name, "error": str(error)[:120]})
-        return None
-    return destination if destination.is_file() and destination.stat().st_size > 0 else None
 
 
 async def extract_poster(video: Path, destination: Path) -> Path | None:

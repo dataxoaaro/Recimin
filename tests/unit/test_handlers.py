@@ -13,7 +13,9 @@ from recimin.config import Settings
 from recimin.db.models import CaptionGate, JobStatus, RecipeStatus
 from recimin.db.repositories import ingredients as ing_repo
 from recimin.db.repositories import jobs as jobs_repo
+from recimin.db.repositories import media as media_repo
 from recimin.db.repositories import recipes as recipes_repo
+from recimin.db.repositories import tags as tags_repo
 from recimin.db.repositories.recipes import RecipeDraft
 from recimin.importer import social, web
 from recimin.importer.normalise import NormalisedRecipe
@@ -42,7 +44,6 @@ METADATA = PostMetadata(
     caption="Kinderin valkoinen sisus ja maitosuklaakuori. Nam!\n\n#kinder #kakku",
     uploader="kinuskikissa",
     webpage_url=IG_URL,
-    duration_s=30.0,
 )
 
 
@@ -114,6 +115,53 @@ async def test_web_import_parses_ingredients_deterministically(
     assert lines[1].alternative_of == 0
 
 
+async def test_a_web_recipe_gets_its_hero_image_downloaded(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """schema.org names the photo; without downloading it a web import renders
+    as an empty card while a social import gets a poster."""
+    with_image = NormalisedRecipe(
+        title=RECIPE.title,
+        ingredients=list(RECIPE.ingredients),
+        instructions_md=RECIPE.instructions_md,
+        image_url="https://www.kinuskikissa.fi/kakku.jpg",
+    )
+    monkeypatch.setattr(web, "extract", lambda url, s: with_image)
+    monkeypatch.setattr(web, "download_image", lambda url, s: (b"fake-jpeg-bytes", "image/jpeg"))
+    job = _job(db, WEB_URL)
+
+    recipe_id = await handlers.handle_import(db, job, settings)  # type: ignore[arg-type]
+
+    recipe = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
+    assert recipe is not None
+    assert recipe.hero_media_id is not None
+    hero = media_repo.get(db, recipe.hero_media_id)
+    assert hero is not None
+    assert hero.recipe_id == recipe_id
+    assert hero.source_url == "https://www.kinuskikissa.fi/kakku.jpg"
+    assert (settings.data_dir / hero.file_path).is_file()
+
+
+async def test_a_failed_hero_download_never_fails_the_import(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with_image = NormalisedRecipe(
+        title=RECIPE.title,
+        ingredients=list(RECIPE.ingredients),
+        instructions_md=RECIPE.instructions_md,
+        image_url="https://www.kinuskikissa.fi/kakku.jpg",
+    )
+    monkeypatch.setattr(web, "extract", lambda url, s: with_image)
+    monkeypatch.setattr(web, "download_image", lambda url, s: None)
+    job = _job(db, WEB_URL)
+
+    recipe_id = await handlers.handle_import(db, job, settings)  # type: ignore[arg-type]
+
+    recipe = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
+    assert recipe is not None
+    assert recipe.hero_media_id is None
+
+
 async def test_a_page_with_no_recipe_needs_attention_not_a_retry(
     db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -162,6 +210,78 @@ async def test_an_already_imported_url_returns_the_existing_recipe(
     assert await handlers.handle_import(db, job, settings) == existing  # type: ignore[arg-type]
 
 
+# ─── short links ─────────────────────────────────────────────────────────
+
+TT_SHORT_URL = "https://vm.tiktok.com/ZM8abcDEF/"
+TT_CANONICAL = "https://www.tiktok.com/@cook/video/7301234567890"
+
+
+def _tiktok_metadata(webpage_url: str) -> PostMetadata:
+    return PostMetadata(
+        post_id="7301234567890",
+        caption="Nopea arkiruoka",
+        uploader="cook",
+        webpage_url=webpage_url,
+    )
+
+
+async def test_a_short_link_to_an_imported_post_returns_the_existing_recipe(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The route cannot dedupe a short link — only the worker learns the real
+    target. Importing the same post twice must not download it twice, and must
+    not crash on the unique source index."""
+    existing = recipes_repo.create(
+        db,
+        RecipeDraft(title="Already here", source_url_normalised=classify(TT_CANONICAL).normalised),
+    )
+
+    async def fake_metadata(classified: object, s: Settings) -> PostMetadata:
+        return _tiktok_metadata(TT_CANONICAL)
+
+    async def should_not_run(*args: object, **kwargs: object) -> object:
+        raise AssertionError("downloaded media for a duplicate")
+
+    monkeypatch.setattr(social, "fetch_metadata", fake_metadata)
+    monkeypatch.setattr(social, "download_media", should_not_run)
+    job = _job(db, TT_SHORT_URL)
+
+    assert await handlers.handle_import(db, job, settings) == existing  # type: ignore[arg-type]
+
+    stored = jobs_repo.get(db, job.id)  # type: ignore[attr-defined]
+    assert stored is not None
+    assert stored.normalised_url == classify(TT_CANONICAL).normalised
+    assert stored.platform == "tiktok"
+
+
+async def test_a_new_short_link_persists_under_its_canonical_url(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42fake-video-bytes")
+
+    async def fake_metadata(classified: object, s: Settings) -> PostMetadata:
+        return _tiktok_metadata(TT_CANONICAL)
+
+    async def fake_download(classified: object, s: Settings) -> tuple[list[Path], str]:
+        return [video], ""
+
+    async def no_cleanup(paths: list[Path]) -> None:
+        return None
+
+    monkeypatch.setattr(social, "fetch_metadata", fake_metadata)
+    monkeypatch.setattr(social, "download_media", fake_download)
+    monkeypatch.setattr(social, "cleanup", no_cleanup)
+    job = _job(db, TT_SHORT_URL)
+
+    recipe_id = await handlers.handle_import(db, job, settings)  # type: ignore[arg-type]
+
+    recipe = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
+    assert recipe is not None
+    assert recipe.source_url_normalised == classify(TT_CANONICAL).normalised
+    assert recipe.source_url == TT_SHORT_URL
+
+
 # ─── the social path ─────────────────────────────────────────────────────
 
 
@@ -181,7 +301,6 @@ def _mock_social(
             caption=caption,
             uploader=METADATA.uploader,
             webpage_url=METADATA.webpage_url,
-            duration_s=30.0,
         )
 
     async def fake_download(classified: object, s: Settings) -> tuple[list[Path], str]:
@@ -287,6 +406,58 @@ async def test_llm_output_replaces_the_caption_draft(
     lines = ing_repo.for_recipe(db, recipe_id)  # type: ignore[arg-type]
     assert [line.raw_text for line in lines] == ["200 g Kinder-suklaata", "2 dl kermaa"]
     assert lines[0].qty == 200.0
+
+
+async def test_the_llm_category_and_tags_are_persisted(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The schema demands a category and offers a tag vocabulary; storing the
+    answer is the whole point of asking. An invented tag is dropped rather than
+    let into the vocabulary."""
+    _mock_social(monkeypatch, tmp_path)
+
+    async def fake_extract(**kwargs: object) -> ExtractedRecipe:
+        return ExtractedRecipe(
+            title="Kinder-juustokakku",
+            language="fi",
+            category="cake",
+            tags=["Party", "make-ahead", "kinder-viral"],
+            ingredients=[{"raw_text": "200 g Kinder-suklaata"}],  # type: ignore[list-item]
+            instructions_md="1. Sulata suklaa",
+            confidence="high",
+        )
+
+    monkeypatch.setattr(llm_extract, "from_social", fake_extract)
+    enabled = settings.model_copy(update={"llm_enabled": True, "openrouter_api_key": "k"})
+    job = _job(db, IG_URL)
+
+    recipe_id = await handlers.handle_import(db, job, enabled)  # type: ignore[arg-type]
+
+    recipe = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
+    assert recipe is not None
+    assert recipe.category == "cake"
+    assert tags_repo.for_recipe(db, recipe_id) == ["make-ahead", "party"]  # type: ignore[arg-type]
+
+
+async def test_a_schema_org_category_lands_on_the_vocabulary(
+    db: sqlite3.Connection, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """recipeCategory is a human-facing string like "Dessert"; it must resolve
+    to a key rather than default everything to dinner."""
+    recipe = NormalisedRecipe(
+        title="Mustikkapiirakka",
+        ingredients=["2 dl kermaa"],
+        instructions_md="1. Bake",
+        category="Dessert",
+    )
+    monkeypatch.setattr(web, "extract", lambda url, s: recipe)
+    job = _job(db, WEB_URL)
+
+    recipe_id = await handlers.handle_import(db, job, settings)  # type: ignore[arg-type]
+
+    stored = recipes_repo.get(db, recipe_id)  # type: ignore[arg-type]
+    assert stored is not None
+    assert stored.category == "sweet_baking"
 
 
 async def test_a_failing_llm_still_yields_a_usable_draft(

@@ -23,7 +23,11 @@ _WHITESPACE = re.compile(r"\s+")
 
 @dataclass(slots=True)
 class NormalisedRecipe:
-    """A recipe extracted from structured data, ready to persist."""
+    """A recipe extracted from structured data, ready to persist.
+
+    `category` is the raw string the source supplied; persist() coerces it to
+    the fixed vocabulary with parse_category, so anything is safe to put here.
+    """
 
     title: str
     ingredients: list[str] = field(default_factory=list)
@@ -35,6 +39,8 @@ class NormalisedRecipe:
     image_url: str | None = None
     author: str | None = None
     language: str = "en"
+    category: str | None = None
+    tags: list[str] = field(default_factory=list)
 
     @property
     def is_usable(self) -> bool:
@@ -117,6 +123,16 @@ def clean_title(value: Any) -> str:
     return stripped if len(stripped) >= 3 else text
 
 
+def node_types(node: dict[str, Any]) -> list[str]:
+    """A node's @type coerced to a list — it ships both ways in the wild.
+
+    Microdata via extruct occasionally lands on a bare "type" key, hence the
+    fallback.
+    """
+    value = node.get("@type") or node.get("type") or ""
+    return value if isinstance(value, list) else [value]
+
+
 def flatten_instructions(value: Any) -> list[str]:
     """recipeInstructions, in any of its shapes, to a list of steps.
 
@@ -132,9 +148,7 @@ def flatten_instructions(value: Any) -> list[str]:
         return _split_lines(value)
 
     if isinstance(value, dict):
-        node_type = value.get("@type", "")
-        types = node_type if isinstance(node_type, list) else [node_type]
-        if "HowToSection" in types:
+        if "HowToSection" in node_types(value):
             # arla nests steps inside sections.
             return flatten_instructions(value.get("itemListElement"))
         return _split_lines(value.get("text") or value.get("name") or "")
@@ -143,9 +157,7 @@ def flatten_instructions(value: Any) -> list[str]:
         parts: list[str] = []
         for item in value:
             if isinstance(item, dict):
-                node_type = item.get("@type", "")
-                types = node_type if isinstance(node_type, list) else [node_type]
-                if "HowToSection" in types:
+                if "HowToSection" in node_types(item):
                     parts.extend(flatten_instructions(item))
                     continue
                 parts.append(clean_text(item.get("text") or item.get("name") or ""))
@@ -202,6 +214,17 @@ def extract_ingredients(value: Any) -> list[str]:
     return [cleaned for item in value if (cleaned := clean_text(item))]
 
 
+def first_text(value: Any) -> str | None:
+    """The first non-empty string in a value that may be a string or a list.
+
+    recipeCategory ships both ways: "Dessert" on most sites, ["Jälkiruoat"]
+    on WordPress recipe plugins.
+    """
+    if isinstance(value, list):
+        value = value[0] if value else None
+    return clean_text(value) or None
+
+
 def first_image(value: Any) -> str | None:
     """image in any of its shapes: string, list, ImageObject, list thereof."""
     if isinstance(value, str):
@@ -250,6 +273,7 @@ def from_schema_org(node: dict[str, Any]) -> NormalisedRecipe:
         image_url=first_image(node.get("image")),
         author=author_name(node.get("author")),
         language=detect_language(node),
+        category=first_text(node.get("recipeCategory")),
     )
 
 
@@ -261,6 +285,17 @@ def detect_language(node: dict[str, Any]) -> str:
     if declared.startswith("en"):
         return "en"
 
-    sample = " ".join(extract_ingredients(node.get("recipeIngredient"))[:8]).lower()
-    finnish_markers = (" dl ", " rkl ", " tl ", " kpl ", "ä", "ö")
-    return "fi" if any(marker in sample for marker in finnish_markers) else "en"
+    sample = " ".join(extract_ingredients(node.get("recipeIngredient"))[:8])
+    return "fi" if looks_finnish(sample) else "en"
+
+
+# Finnish units, the umlauts, and the omnipresent "ja". The one heuristic for
+# every path — schema.org samples and social captions used to keep separate,
+# quietly diverging marker lists for the same question.
+_FINNISH_MARKERS = (" dl ", " rkl ", " tl ", " kpl ", "ä", "ö", " ja ")
+
+
+def looks_finnish(text: str) -> bool:
+    """Whether a snippet of recipe text reads as Finnish."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in _FINNISH_MARKERS)

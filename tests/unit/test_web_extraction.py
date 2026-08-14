@@ -110,6 +110,17 @@ def test_instruction_arrays_are_joined_before_splitting() -> None:
     assert steps[0] == "Lisää sokeri ja vatkaa kunnes seos on vaaleaa."
 
 
+def test_recipe_category_is_carried_through() -> None:
+    """recipeCategory ships as a string or a list; either way persist() gets to
+    see it rather than defaulting every import to dinner."""
+    from recimin.importer.normalise import from_schema_org
+
+    node = {"@type": "Recipe", "name": "Kakku", "recipeIngredient": ["2 dl kermaa"]}
+    assert from_schema_org({**node, "recipeCategory": "Dessert"}).category == "Dessert"
+    assert from_schema_org({**node, "recipeCategory": ["Jälkiruoat"]}).category == "Jälkiruoat"
+    assert from_schema_org(node).category is None
+
+
 # ─── real pages ──────────────────────────────────────────────────────────
 
 

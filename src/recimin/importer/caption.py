@@ -11,11 +11,15 @@ and after a hundred imports the answer is measured rather than assumed.
 
 import re
 
+from recimin.importer.ingredients import UNITS
+
 # A quantity at the start of a line: "2 dl", "1½ rkl", "200 g", "1 kpl",
-# "2 cups", "½ tsp". Finnish units first, since they are the common case here.
-_UNITS = (
-    "dl|rkl|tl|kpl|g|kg|l|ml|prk|ps|pkt|nippu|tlk"
-    "|cups?|tbsps?|tsps?|oz|lbs?|pounds?|ounces?|grams?|cloves?|pinch"
+# "2 cups", "½ tsp". The vocabulary is the parser's own — one list to keep
+# updated, not two — plus caption-only words the parser never sees in
+# structured lines. Longest-first so "kg" cannot lose to "g" in alternation.
+_CAPTION_ONLY = ("pinch", "clove", "cloves", "ounce", "ounces", "tbsps", "tsps")
+_UNITS = "|".join(
+    sorted({re.escape(unit) for unit in (*UNITS, *_CAPTION_ONLY)}, key=len, reverse=True)
 )
 _QUANTITY_LINE = re.compile(
     rf"^\s*(?:\d+[.,]?\d*|[½¼¾⅓⅔⅛]|\d+\s*[½¼¾⅓⅔⅛])\s*(?:{_UNITS})?\b",

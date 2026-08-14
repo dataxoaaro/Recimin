@@ -17,8 +17,8 @@ Worth keeping in proportion: what gets sent is frames and the caption from a
 *public* social post, not anything of the user's.
 """
 
+import asyncio
 import base64
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,7 +114,10 @@ async def extract(
     if not settings.llm_enabled or not settings.openrouter_api_key:
         raise LlmUnavailable("LLM extraction is disabled")
 
-    payload = build_payload(
+    # Threaded: reading and base64-encoding a dozen frame JPEGs is file I/O
+    # that has no business on the worker's event loop.
+    payload = await asyncio.to_thread(
+        build_payload,
         settings.openrouter_model,
         settings.openrouter_model_fallback,
         system,
@@ -189,15 +192,3 @@ async def extract(
             return recipe, usage
 
     raise LlmRefused(f"schema validation failed twice: {last_error}")
-
-
-def parse_json_response(raw: str) -> dict[str, object]:
-    """Best-effort JSON parse, tolerating a markdown fence.
-
-    OpenRouter's Response Healing normally strips these, but it is
-    non-streaming only and not every provider routes through it.
-    """
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-    return json.loads(text)
