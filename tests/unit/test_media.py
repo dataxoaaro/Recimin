@@ -1,6 +1,7 @@
 """Media storage and its routes."""
 
 import hashlib
+import io
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,32 @@ def test_unsupported_type_is_refused(tmp_path: Path) -> None:
 def test_oversized_file_is_refused(tmp_path: Path) -> None:
     with pytest.raises(store.MediaTooLarge):
         store.store_bytes(b"x" * (store.MAX_UPLOAD_BYTES + 1), "image/png", media_dir=tmp_path)
+
+
+def test_a_multi_chunk_stream_round_trips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store, "CHUNK_BYTES", 8)
+    payload = PNG * 3
+    stored = store.store_stream(io.BytesIO(payload), "image/png", media_dir=tmp_path)
+
+    assert stored.sha256 == hashlib.sha256(payload).hexdigest()
+    assert stored.bytes == len(payload)
+    assert (tmp_path / stored.relative_path).read_bytes() == payload
+
+
+def test_an_oversized_stream_is_cut_off_mid_flight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cap must trigger while streaming, not after the whole body is read —
+    otherwise a 2GB upload costs 2GB before being told no."""
+    monkeypatch.setattr(store, "MAX_UPLOAD_BYTES", 10)
+    monkeypatch.setattr(store, "CHUNK_BYTES", 4)
+    source = io.BytesIO(b"x" * 100)
+
+    with pytest.raises(store.MediaTooLarge):
+        store.store_stream(source, "image/png", media_dir=tmp_path)
+
+    assert source.tell() < 100  # rejected before the source was drained
+    assert list(tmp_path.rglob("*.part")) == []  # and the temp file is gone
 
 
 def test_path_traversal_is_refused(tmp_path: Path) -> None:
@@ -104,6 +131,23 @@ def test_media_requires_a_session(client: TestClient, auth_client: TestClient) -
 
 def test_missing_media_is_404(auth_client: TestClient) -> None:
     assert auth_client.get("/api/media/9999").status_code == 404
+
+
+def test_an_oversized_content_length_never_reaches_the_parser(
+    auth_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An honest client declaring 17KB against a 10-byte cap is refused from
+    the headers alone; the multipart body is never parsed or stored."""
+    monkeypatch.setattr(store, "MAX_UPLOAD_BYTES", 10)
+
+    def should_not_run(*args: object, **kwargs: object) -> object:
+        raise AssertionError("the body was parsed despite its Content-Length")
+
+    monkeypatch.setattr(store, "store_stream", should_not_run)
+    response = auth_client.post(
+        "/api/media", files={"file": ("big.png", b"x" * (17 * 1024), "image/png")}
+    )
+    assert response.status_code == 413
 
 
 def test_storage_guard_returns_507(auth_client: TestClient) -> None:

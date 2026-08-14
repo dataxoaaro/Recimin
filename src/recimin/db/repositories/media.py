@@ -1,8 +1,8 @@
 """Stored media files.
 
-Content-addressed on disk; this table holds only metadata. Discard semantics
-follow IGStore: delete the file, keep the row stamped discarded_at, so an import
-never re-downloads something that was deliberately removed.
+Content-addressed on disk; this table holds only metadata. Rows cascade with
+their recipe; the bytes are deleted by the recipe route unless another live
+row shares the same sha256.
 """
 
 import sqlite3
@@ -21,30 +21,14 @@ def create(
     mime: str,
     recipe_id: int | None = None,
     position: int = 0,
-    width: int | None = None,
-    height: int | None = None,
-    duration_s: float | None = None,
     source_url: str | None = None,
 ) -> int:
     """Record a stored file. Returns the new media id."""
     cursor = conn.execute(
         "INSERT INTO media (recipe_id, kind, position, file_path, sha256, bytes, mime,"
-        " width, height, duration_s, source_url, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            recipe_id,
-            str(kind),
-            position,
-            file_path,
-            sha256,
-            bytes_,
-            mime,
-            width,
-            height,
-            duration_s,
-            source_url,
-            now(),
-        ),
+        " source_url, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (recipe_id, str(kind), position, file_path, sha256, bytes_, mime, source_url, now()),
     )
     return int(cursor.lastrowid or 0)
 
@@ -79,11 +63,6 @@ def for_recipe(
 def attach_to_recipe(conn: sqlite3.Connection, media_id: int, recipe_id: int) -> None:
     """Bind an orphan media row to a recipe."""
     conn.execute("UPDATE media SET recipe_id = ? WHERE id = ?", (recipe_id, media_id))
-
-
-def discard(conn: sqlite3.Connection, media_id: int) -> None:
-    """Mark a file as deliberately removed. The caller deletes the bytes."""
-    conn.execute("UPDATE media SET discarded_at = ? WHERE id = ?", (now(), media_id))
 
 
 def total_bytes(conn: sqlite3.Connection) -> int:

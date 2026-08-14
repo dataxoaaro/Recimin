@@ -101,6 +101,21 @@ def test_all_tables_exist(db: sqlite3.Connection) -> None:
     } <= names
 
 
+def test_the_polled_listings_are_index_served(db: sqlite3.Connection) -> None:
+    """GET /api/imports runs every 3 seconds and the library on every visit;
+    neither may degrade into a scan-and-sort as the tables grow."""
+    queries = (
+        "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT 50",
+        "SELECT id FROM recipes ORDER BY created_at DESC, id DESC LIMIT 100",
+        "SELECT id FROM recipes WHERE status = 'draft' ORDER BY created_at DESC LIMIT 100",
+    )
+    for query in queries:
+        plan = " ".join(
+            row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {query}").fetchall()
+        )
+        assert "TEMP B-TREE" not in plan, f"{query}\n  plan: {plan}"
+
+
 def test_source_url_unique_but_nulls_are_free(db: sqlite3.Connection) -> None:
     """The dedupe mechanism. Many manual recipes have no source at all."""
     _recipe(db, "a", source_url_normalised="https://x.fi/r")

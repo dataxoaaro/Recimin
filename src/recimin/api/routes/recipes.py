@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from recimin.api.deps import CurrentUser, DbDep
+from recimin.api.deps import CurrentUser, DbDep, SettingsDep
 from recimin.api.schemas import (
     CategoryOut,
     IngredientOut,
@@ -15,12 +15,14 @@ from recimin.api.schemas import (
     RecipeSummary,
 )
 from recimin.db.categories import CATEGORY_META, Category
-from recimin.db.models import Recipe, RecipeStatus
+from recimin.db.models import Recipe, RecipeListing, RecipeStatus
 from recimin.db.repositories import ingredients as ing_repo
+from recimin.db.repositories import media as media_repo
 from recimin.db.repositories import recipes as recipes_repo
 from recimin.db.repositories import tags as tags_repo
 from recimin.db.repositories.ingredients import IngredientDraft
 from recimin.db.repositories.recipes import RecipeDraft
+from recimin.media import store
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
@@ -28,22 +30,10 @@ NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "Recipe not found")
 
 
 def _to_drafts(lines: list[IngredientOut] | list) -> list[IngredientDraft]:
-    return [
-        IngredientDraft(
-            raw_text=line.raw_text,
-            original_text=line.original_text,
-            qty=line.qty,
-            unit=line.unit,
-            item=line.item,
-            note=line.note,
-            group_label=line.group_label,
-            alternative_of=line.alternative_of,
-        )
-        for line in lines
-    ]
+    return [IngredientDraft(**line.model_dump(exclude={"position"})) for line in lines]
 
 
-def _summary(recipe: Recipe) -> RecipeSummary:
+def _summary(recipe: Recipe | RecipeListing) -> RecipeSummary:
     return RecipeSummary(
         id=recipe.id,
         title=recipe.title,
@@ -198,10 +188,19 @@ def patch_recipe(recipe_id: int, body: RecipePatch, _: CurrentUser, conn: DbDep)
 
 
 @router.delete("/{recipe_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_recipe(recipe_id: int, _: CurrentUser, conn: DbDep) -> None:
-    """Delete a recipe. Ingredients, tags and media cascade."""
+def delete_recipe(recipe_id: int, _: CurrentUser, conn: DbDep, settings: SettingsDep) -> None:
+    """Delete a recipe. Ingredients, tags and media rows cascade.
+
+    The media bytes go too — nothing else ever removed them, so deleted
+    recipes used to keep their videos on disk forever. Storage is
+    content-addressed, so a file another recipe still references stays.
+    """
+    media_rows = media_repo.for_recipe(conn, recipe_id)
     if not recipes_repo.delete(conn, recipe_id):
         raise NOT_FOUND
+    for row in media_rows:
+        if media_repo.find_by_sha256(conn, row.sha256) is None:
+            store.delete_file(row.file_path, media_dir=settings.data_dir)
 
 
 @router.post("/{recipe_id}/favourite", response_model=RecipeOut)

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from recimin.db.clock import now
 from recimin.db.connection import transaction
-from recimin.db.models import Recipe, RecipeStatus, SourcePlatform
+from recimin.db.models import Recipe, RecipeListing, RecipeStatus, SourcePlatform
 from recimin.db.repositories import ingredients as ingredients_repo
 from recimin.db.repositories import tags as tags_repo
 
@@ -165,11 +165,13 @@ def list_recipes(
     status: RecipeStatus | None = None,
     limit: int = 200,
     offset: int = 0,
-) -> list[Recipe]:
+) -> list[RecipeListing]:
     """Filtered listing, newest first.
 
     A text query joins the FTS index; the remaining filters are plain indexed
-    predicates and compose freely with it.
+    predicates and compose freely with it. Returns card-sized listings rather
+    than full rows: the response never carries the recipe bodies, so neither
+    should the query.
     """
     where: list[str] = []
     params: dict[str, object] = {"limit": limit, "offset": offset}
@@ -194,12 +196,16 @@ def list_recipes(
         params["tag"] = tag
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
+    columns = (
+        "r.id, r.title, r.category, r.language, r.is_favourite, r.status, r.created_at,"
+        " r.servings, r.total_time_minutes, r.hero_media_id, r.source_platform"
+    )
     rows = conn.execute(
-        f"SELECT r.* FROM recipes r {clause}"
+        f"SELECT {columns} FROM recipes r {clause}"
         " ORDER BY r.created_at DESC, r.id DESC LIMIT :limit OFFSET :offset",
         params,
     ).fetchall()
-    return [Recipe.from_row(row) for row in rows]
+    return [RecipeListing.from_row(row) for row in rows]
 
 
 def _fts_query(raw: str) -> str:

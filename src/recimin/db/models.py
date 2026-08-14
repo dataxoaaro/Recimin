@@ -33,7 +33,6 @@ class MediaKind(StrEnum):
     IMAGE = "image"
     VIDEO = "video"
     AUDIO = "audio"
-    FRAME = "frame"
 
 
 class JobStatus(StrEnum):
@@ -56,7 +55,6 @@ class JobStage(StrEnum):
     RESOLVE = "resolve"
     FETCH = "fetch"
     MEDIA = "media"
-    FRAMES = "frames"
     EXTRACT = "extract"
     PERSIST = "persist"
 
@@ -235,6 +233,45 @@ class Recipe:
             source_title=row["source_title"],
             source_platform=SourcePlatform(platform) if platform else None,
             imported_at=row["imported_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RecipeListing:
+    """The card-sized slice of a recipe, for the library grid.
+
+    A separate type so the listing query can skip instructions_md — the recipe
+    body, kilobytes per row for imports that embed a transcript — instead of
+    reading it 500 rows at a time and throwing it away.
+    """
+
+    id: int
+    title: str
+    category: str
+    language: str
+    is_favourite: bool
+    status: RecipeStatus
+    created_at: str
+    servings: int | None = None
+    total_time_minutes: int | None = None
+    hero_media_id: int | None = None
+    source_platform: SourcePlatform | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Self:
+        platform = row["source_platform"]
+        return cls(
+            id=row["id"],
+            title=row["title"],
+            category=row["category"],
+            language=row["language"],
+            is_favourite=bool(row["is_favourite"]),
+            status=RecipeStatus(row["status"]),
+            created_at=row["created_at"],
+            servings=row["servings"],
+            total_time_minutes=row["total_time_minutes"],
+            hero_media_id=row["hero_media_id"],
+            source_platform=SourcePlatform(platform) if platform else None,
         )
 
 

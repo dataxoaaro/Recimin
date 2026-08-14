@@ -140,6 +140,48 @@ def test_delete_removes_it(auth_client: TestClient) -> None:
     assert auth_client.delete(f"/api/recipes/{created['id']}").status_code == 404
 
 
+PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _upload(client: TestClient, recipe_id: int, payload: bytes) -> dict[str, Any]:
+    response = client.post(
+        "/api/media",
+        params={"recipe_id": recipe_id},
+        files={"file": ("hero.png", payload, "image/png")},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_delete_removes_the_media_bytes_too(auth_client: TestClient) -> None:
+    """Nothing else ever deletes files, so a deleted recipe used to keep its
+    media on disk forever."""
+    created = _create(auth_client)
+    media_id = _upload(auth_client, created["id"], PNG)["id"]
+    assert auth_client.get(f"/api/media/{media_id}").status_code == 200
+
+    assert auth_client.delete(f"/api/recipes/{created['id']}").status_code == 204
+
+    data_dir = auth_client.app.state.settings.data_dir  # type: ignore[attr-defined]
+    assert list((data_dir / "media").rglob("*.png")) == []
+
+
+def test_the_same_bytes_uploaded_twice_share_one_row(auth_client: TestClient) -> None:
+    """file_path is UNIQUE, so a second insert for the same bytes is not an
+    option — this used to 500 on the constraint instead of deduplicating."""
+    first = _create(auth_client)
+    second = _create(auth_client, title="Sama kuva")
+    a = _upload(auth_client, first["id"], PNG)
+    b = _upload(auth_client, second["id"], PNG)
+
+    assert b["id"] == a["id"]
+    assert b["deduplicated"] is True
+
+
 # ─── listing and filters ─────────────────────────────────────────────────
 
 

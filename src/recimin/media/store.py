@@ -9,10 +9,13 @@ file, and re-importing the same post never rewrites it.
 """
 
 import hashlib
+import io
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,7 @@ EXTENSIONS: dict[str, str] = {
 }
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+CHUNK_BYTES = 1 << 20
 
 
 class UnsupportedMediaType(ValueError):
@@ -36,10 +40,6 @@ class UnsupportedMediaType(ValueError):
 
 class MediaTooLarge(ValueError):
     """A single file exceeded the per-upload cap."""
-
-
-class StorageFull(RuntimeError):
-    """Storing this file would cross the configured total-bytes guard."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,34 +58,58 @@ def relative_path_for(sha256: str, extension: str) -> str:
     return f"media/{sha256[:2]}/{sha256}.{extension}"
 
 
-def store_bytes(payload: bytes, mime: str, *, media_dir: Path) -> StoredFile:
-    """Write bytes into the store and return their address.
+def store_stream(source: BinaryIO, mime: str, *, media_dir: Path) -> StoredFile:
+    """Stream bytes into the store, hashing as they arrive.
 
     media_dir is the parent of the `media/` tree — normally the data directory.
+
+    The content address is only known once the last byte is hashed, so the
+    stream lands in a temp file and is renamed into place. The size cap is
+    enforced per chunk: an oversized upload is rejected 25MB in, not after it
+    has been read whole into memory.
     """
     if mime not in EXTENSIONS:
         raise UnsupportedMediaType(mime)
-    if len(payload) > MAX_UPLOAD_BYTES:
-        raise MediaTooLarge(f"{len(payload)} bytes")
 
-    digest = hashlib.sha256(payload).hexdigest()
-    relative = relative_path_for(digest, EXTENSIONS[mime])
+    (media_dir / "media").mkdir(parents=True, exist_ok=True)
+    temporary = media_dir / "media" / f".incoming-{uuid.uuid4().hex}.part"
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        with temporary.open("wb") as handle:
+            while chunk := source.read(CHUNK_BYTES):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise MediaTooLarge(f"more than {MAX_UPLOAD_BYTES} bytes")
+                digest.update(chunk)
+                handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+    sha256 = digest.hexdigest()
+    relative = relative_path_for(sha256, EXTENSIONS[mime])
     destination = media_dir / relative
 
     if destination.exists():
         # Same bytes, same path. Nothing to do.
-        return StoredFile(relative, digest, len(payload), mime, deduplicated=True)
+        temporary.unlink(missing_ok=True)
+        return StoredFile(relative, sha256, total, mime, deduplicated=True)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".part")
-    with temporary.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
     temporary.replace(destination)
 
-    logger.info("media stored", extra={"sha256": digest, "bytes": len(payload), "mime": mime})
-    return StoredFile(relative, digest, len(payload), mime, deduplicated=False)
+    logger.info("media stored", extra={"sha256": sha256, "bytes": total, "mime": mime})
+    return StoredFile(relative, sha256, total, mime, deduplicated=False)
+
+
+def store_bytes(payload: bytes, mime: str, *, media_dir: Path) -> StoredFile:
+    """Write in-memory bytes into the store. See store_stream."""
+    if mime in EXTENSIONS and len(payload) > MAX_UPLOAD_BYTES:
+        raise MediaTooLarge(f"{len(payload)} bytes")
+    return store_stream(io.BytesIO(payload), mime, media_dir=media_dir)
 
 
 def absolute_path(relative: str, *, media_dir: Path) -> Path:
@@ -98,7 +122,7 @@ def absolute_path(relative: str, *, media_dir: Path) -> Path:
 
 
 def delete_file(relative: str, *, media_dir: Path) -> bool:
-    """Remove the bytes for a discarded file. The database row is kept."""
+    """Remove the bytes for a file whose last referencing row is gone."""
     path = absolute_path(relative, media_dir=media_dir)
     if not path.is_file():
         return False
