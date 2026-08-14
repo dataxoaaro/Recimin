@@ -56,9 +56,11 @@ def notify(
     title: str,
     body: str,
     url: str = "/",
-    user_id: int | None = None,
 ) -> int:
     """Send a notification to every live subscription. Returns how many landed.
+
+    Every subscription, deliberately: an import's outcome is household news,
+    not a per-user message.
 
     Never raises: a failed notification must not fail the import that triggered
     it. The recipe is already saved either way.
@@ -67,16 +69,10 @@ def notify(
         logger.debug("push not configured")
         return 0
 
-    sql = "SELECT * FROM push_subscriptions"
-    params: tuple[object, ...] = ()
-    if user_id is not None:
-        sql += " WHERE user_id = ?"
-        params = (user_id,)
-
     payload = json.dumps({"title": title, "body": body, "url": url})
     delivered = 0
 
-    for row in conn.execute(sql, params).fetchall():
+    for row in conn.execute("SELECT * FROM push_subscriptions").fetchall():
         try:
             webpush(
                 subscription_info={

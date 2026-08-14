@@ -38,11 +38,6 @@ def set_password_hash(conn: sqlite3.Connection, user_id: int, password_hash: str
     conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
 
 
-def count(conn: sqlite3.Connection) -> int:
-    """How many users exist."""
-    return int(conn.execute("SELECT count(*) AS n FROM users").fetchone()["n"])
-
-
 def create_token(conn: sqlite3.Connection, *, user_id: int, name: str, token_hash: str) -> int:
     """Store a device token hash. The plaintext is shown once and never kept."""
     cursor = conn.execute(
@@ -50,6 +45,14 @@ def create_token(conn: sqlite3.Connection, *, user_id: int, name: str, token_has
         (user_id, name.strip(), token_hash, now()),
     )
     return int(cursor.lastrowid or 0)
+
+
+def get_token(conn: sqlite3.Connection, token_id: int, *, user_id: int) -> ApiToken | None:
+    """One token by id, only if it belongs to this user."""
+    row = conn.execute(
+        "SELECT * FROM api_tokens WHERE id = ? AND user_id = ?", (token_id, user_id)
+    ).fetchone()
+    return ApiToken.from_row(row) if row else None
 
 
 def get_active_token(conn: sqlite3.Connection, token_hash: str) -> ApiToken | None:

@@ -36,9 +36,3 @@ def create_subscription(body: SubscribeRequest, user: CurrentUser, conn: DbDep) 
         auth=body.keys.auth,
     )
     return {"id": subscription_id}
-
-
-@router.post("/unsubscribe", status_code=status.HTTP_204_NO_CONTENT)
-def remove_subscription(body: dict[str, str], _: CurrentUser, conn: DbDep) -> None:
-    """Forget this browser."""
-    push.unsubscribe(conn, body.get("endpoint", ""))

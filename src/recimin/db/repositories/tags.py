@@ -46,19 +46,3 @@ def for_recipe(conn: sqlite3.Connection, recipe_id: int) -> list[str]:
         (recipe_id,),
     ).fetchall()
     return [row["name"] for row in rows]
-
-
-def all_with_counts(conn: sqlite3.Connection) -> list[tuple[str, int]]:
-    """Every tag in use with its recipe count, most used first."""
-    rows = conn.execute(
-        "SELECT t.name, count(rt.recipe_id) AS n FROM tags t"
-        " JOIN recipe_tags rt ON rt.tag_id = t.id"
-        " GROUP BY t.id ORDER BY n DESC, t.name"
-    ).fetchall()
-    return [(row["name"], row["n"]) for row in rows]
-
-
-def prune_orphans(conn: sqlite3.Connection) -> int:
-    """Delete tags no longer attached to any recipe. Returns the count removed."""
-    cursor = conn.execute("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM recipe_tags)")
-    return cursor.rowcount

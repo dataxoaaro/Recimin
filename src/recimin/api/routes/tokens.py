@@ -38,7 +38,9 @@ def create_token(body: TokenCreateRequest, user: CurrentUser, conn: DbDep) -> To
     """Mint a device token. The plaintext is in this response and nowhere else."""
     plaintext, token_hash = auth.generate_device_token()
     token_id = users_repo.create_token(conn, user_id=user.id, name=body.name, token_hash=token_hash)
-    created = next(t for t in users_repo.tokens_for_user(conn, user.id) if t.id == token_id)
+    created = users_repo.get_token(conn, token_id, user_id=user.id)
+    if created is None:  # pragma: no cover - defensive
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Token not found")
     logger.info("device token created", extra={"user_id": user.id, "token_id": token_id})
     return TokenCreatedOut(
         id=created.id,
@@ -57,8 +59,7 @@ def revoke_token(token_id: int, user: CurrentUser, conn: DbDep) -> None:
     The ownership check is the whole point: without it this is Arboretium's
     admin-route bug in a different costume.
     """
-    owned = {token.id for token in users_repo.tokens_for_user(conn, user.id)}
-    if token_id not in owned:
+    if users_repo.get_token(conn, token_id, user_id=user.id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Token not found")
     if not users_repo.revoke_token(conn, token_id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Token already revoked")
