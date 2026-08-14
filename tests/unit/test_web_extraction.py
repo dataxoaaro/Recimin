@@ -142,7 +142,7 @@ def test_private_addresses_are_refused(url: str, monkeypatch: pytest.MonkeyPatch
 
 
 def test_a_hostname_resolving_privately_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(web.socket, "getaddrinfo", _resolver({"innocent.example": "192.168.1.8"}))
+    monkeypatch.setattr(web.socket, "getaddrinfo", _resolver({"innocent.example": "192.168.0.50"}))
     with pytest.raises(web.FetchFailed, match="non-public"):
         web._reject_non_public_host("https://innocent.example/recipe")
 
