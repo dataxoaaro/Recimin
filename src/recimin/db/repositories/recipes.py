@@ -42,7 +42,7 @@ class RecipeDraft:
 
     title: str
     instructions_md: str = ""
-    category: str = "main_course"
+    category: str = "dinner"
     language: str = "en"
     status: RecipeStatus = RecipeStatus.DRAFT
     description: str | None = None

@@ -66,8 +66,21 @@ def test_unknown_category_is_refused(auth_client: TestClient) -> None:
 def test_categories_endpoint_lists_the_vocabulary(auth_client: TestClient) -> None:
     body = auth_client.get("/api/recipes/categories").json()
     keys = {row["key"] for row in body}
-    assert {"main_course", "cake", "bread", "dessert"} <= keys
+    assert {"dinner", "salad", "cake", "savoury_baking"} <= keys
     assert all(row["colour"].startswith("#") for row in body)
+
+
+def test_categories_endpoint_omits_retired_keys(auth_client: TestClient) -> None:
+    """The filter row renders whatever this returns, so a retired key here would
+    put a category back on screen that nothing can be filed under."""
+    keys = {row["key"] for row in auth_client.get("/api/recipes/categories").json()}
+    assert keys.isdisjoint({"main_course", "soup", "bread", "dessert", "drink"})
+
+
+def test_the_filter_row_stays_short(auth_client: TestClient) -> None:
+    """Thirteen categories overflowed a phone screen and made the row the
+    heaviest element on the library. Six fit; this guards the regression."""
+    assert len(auth_client.get("/api/recipes/categories").json()) <= 8
 
 
 def test_missing_recipe_is_404(auth_client: TestClient) -> None:

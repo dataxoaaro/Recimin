@@ -36,10 +36,13 @@ def test_discover_rejects_version_gap(tmp_path: Path) -> None:
 
 
 def test_migrate_is_idempotent(tmp_path: Path) -> None:
+    # Derived from the directory rather than hardcoded, so adding a migration
+    # does not fail a test that is about idempotency, not about the version.
+    latest = len(sorted(Path("migrations").glob("*.sql")))
     conn = connect(tmp_path / "t.db")
-    assert schema.migrate(conn) == 1
-    assert schema.migrate(conn) == 1
-    assert schema.current_version(conn) == 1
+    assert schema.migrate(conn) == latest
+    assert schema.migrate(conn) == latest
+    assert schema.current_version(conn) == latest
 
 
 def test_failed_migration_rolls_back_whole_file(tmp_path: Path) -> None:
@@ -261,3 +264,42 @@ def test_an_empty_migrations_directory_raises(tmp_path: Path) -> None:
     empty.mkdir()
     with pytest.raises(FileNotFoundError, match="no migrations"):
         schema.discover(empty)
+
+
+def test_category_reduction_remaps_existing_rows(tmp_path: Path) -> None:
+    """The lossy part of 0002, exercised against a real database.
+
+    Applying 0001 alone, seeding it with the old vocabulary, then migrating
+    forward — because the failure that matters is a row keeping a retired key
+    and disappearing from a filter row that only lists current categories.
+    """
+    from recimin.db.categories import Category
+
+    conn = connect(tmp_path / "t.db")
+    initial = Path("migrations/0001_initial.sql").read_text(encoding="utf-8")
+    conn.executescript(f"BEGIN;\n{initial}\nPRAGMA user_version = 1;\nCOMMIT;")
+
+    seeded = ["main_course", "soup", "sauce", "drink", "bread", "dessert", "cake", "salad"]
+    for index, category in enumerate(seeded):
+        conn.execute(
+            "INSERT INTO recipes (title, category, created_at, updated_at)"
+            " VALUES (?, ?, '2026-01-01', '2026-01-01')",
+            (f"r{index}", category),
+        )
+
+    schema.migrate(conn)
+
+    surviving = {row["category"] for row in conn.execute("SELECT category FROM recipes")}
+    assert surviving <= {c.value for c in Category}, "a retired key survived the migration"
+
+    def category_of(title: str) -> str:
+        row = conn.execute("SELECT category FROM recipes WHERE title = ?", (title,)).fetchone()
+        return str(row["category"])
+
+    assert category_of("r0") == "dinner"  # main_course
+    assert category_of("r1") == "dinner"  # soup
+    assert category_of("r4") == "savoury_baking"  # bread
+    assert category_of("r5") == "sweet_baking"  # dessert
+    # Already-current keys are left alone rather than swept into the default.
+    assert category_of("r6") == "cake"
+    assert category_of("r7") == "salad"

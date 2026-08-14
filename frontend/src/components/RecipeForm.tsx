@@ -25,7 +25,7 @@ interface Draft {
 function toDraft(recipe?: Recipe): Draft {
   return {
     title: recipe?.title ?? "",
-    category: recipe?.category ?? "main_course",
+    category: recipe?.category ?? "dinner",
     language: recipe?.language ?? "en",
     servings: recipe?.servings?.toString() ?? "",
     yield_text: recipe?.yield_text ?? "",

@@ -78,7 +78,7 @@ class IngredientOut(IngredientIn):
 class RecipeIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     instructions_md: str = Field(default="", max_length=50_000)
-    category: str = "main_course"
+    category: str = "dinner"
     language: str = Field(default="en", pattern="^(fi|en)$")
     description: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=10_000)
