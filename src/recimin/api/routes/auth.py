@@ -62,7 +62,6 @@ def register(
     settings: SettingsDep,
 ) -> UserOut:
     """Create an account. Gated by the shared site password."""
-    ratelimit.ensure_table(conn)
     bucket = f"register:ip:{client_ip(request)}"
     _reject_if_limited(ratelimit.check(conn, bucket, ratelimit.REGISTER_PER_IP))
 
@@ -96,7 +95,6 @@ def login(
     settings: SettingsDep,
 ) -> UserOut:
     """Exchange credentials for a session cookie."""
-    ratelimit.ensure_table(conn)
     ip_bucket = f"login:ip:{client_ip(request)}"
     email_bucket = f"login:email:{body.email.lower()}"
     _reject_if_limited(

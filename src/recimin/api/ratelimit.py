@@ -33,14 +33,6 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 
 
 @dataclass(frozen=True, slots=True)
-class Limit:
-    """A maximum number of hits within a rolling window of whole seconds."""
-
-    max_hits: int
-    window_seconds: int
-
-
-@dataclass(frozen=True, slots=True)
 class Decision:
     """Whether an attempt may proceed, and when the caller may retry.
 
@@ -57,7 +49,8 @@ def ensure_table(conn: sqlite3.Connection) -> None:
     """Create the counter table if it does not exist.
 
     Kept out of the migrations because it is throwaway operational state, not
-    part of the data model; dropping it costs nothing.
+    part of the data model; dropping it costs nothing. Run once at app
+    startup, not per request.
     """
     conn.execute(_SCHEMA)
 
@@ -96,6 +89,10 @@ def record_failure(
     _, window = limit
     timestamp = int(now if now is not None else time.time())
 
+    # Housekeeping piggybacked on the table's only write path: without it,
+    # stale window rows accumulated for the life of the database.
+    purge_expired(conn, now=timestamp)
+
     conn.execute(
         "INSERT INTO rate_limits (bucket, window_start, hits) VALUES (?, ?, 1)"
         " ON CONFLICT(bucket, window_start) DO UPDATE SET hits = hits + 1",
@@ -117,8 +114,13 @@ def describe_wait(seconds: int) -> str:
     return "1 minute" if minutes == 1 else f"{minutes} minutes"
 
 
-def purge_expired(conn: sqlite3.Connection, *, older_than_seconds: int = 24 * 60 * 60) -> int:
+def purge_expired(
+    conn: sqlite3.Connection,
+    *,
+    older_than_seconds: int = 24 * 60 * 60,
+    now: float | None = None,
+) -> int:
     """Drop stale counter rows. Returns how many went."""
-    cutoff = int(time.time()) - older_than_seconds
+    cutoff = int(now if now is not None else time.time()) - older_than_seconds
     cursor = conn.execute("DELETE FROM rate_limits WHERE window_start < ?", (cutoff,))
     return cursor.rowcount

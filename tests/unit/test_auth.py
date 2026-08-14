@@ -90,6 +90,20 @@ def test_rate_limit_trips_then_recovers_next_window(db: sqlite3.Connection) -> N
     assert ratelimit.check(db, "b", limit, now=base + 60).allowed is True
 
 
+def test_stale_windows_are_purged_by_the_next_failure(db: sqlite3.Connection) -> None:
+    """Failures are the table's only writes, so cleanup rides along on them —
+    otherwise stale window rows accumulate for the life of the database."""
+    ratelimit.ensure_table(db)
+    limit = (3, 60)
+    day = 24 * 60 * 60
+
+    ratelimit.record_failure(db, "old", limit, now=0)
+    ratelimit.record_failure(db, "fresh", limit, now=float(2 * day))
+
+    buckets = {row["bucket"] for row in db.execute("SELECT bucket FROM rate_limits")}
+    assert buckets == {"fresh"}
+
+
 def test_rate_limit_buckets_are_independent(db: sqlite3.Connection) -> None:
     ratelimit.ensure_table(db)
     limit = (1, 60)

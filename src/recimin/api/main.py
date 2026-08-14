@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from recimin import __version__
+from recimin.api import ratelimit
 from recimin.api.middleware import build_origin_guard
 from recimin.api.routes import auth as auth_routes
 from recimin.api.routes import imports as import_routes
@@ -92,12 +93,15 @@ def create_app(
     settings = settings or get_settings()
     factory = db_factory or (lambda: connect(settings.db_path))
 
-    if migrate:
-        bootstrap = factory()
-        try:
+    bootstrap = factory()
+    try:
+        if migrate:
             schema.migrate(bootstrap)
-        finally:
-            bootstrap.close()
+        # Operational state, not data model — created here rather than by a
+        # migration, and here rather than per login request.
+        ratelimit.ensure_table(bootstrap)
+    finally:
+        bootstrap.close()
 
     # No interactive docs and no schema endpoint: this is a private household
     # app, and publishing its API surface buys nothing.
