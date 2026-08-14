@@ -10,6 +10,16 @@ recipes from web pages, Instagram and TikTok on an iPhone. Share a link, and
 moments later the recipe is in the library: ingredients parsed, category
 assigned, media archived.
 
+<p align="center">
+  <img src="docs/screenshots/library.png" width="195" alt="Library — the recipe grid with category filters">
+  <img src="docs/screenshots/recipe.png" width="195" alt="Recipe — ingredients, category and cook button">
+  <img src="docs/screenshots/cook-mode.png" width="195" alt="Cook mode — one step at a time with a servings stepper">
+  <img src="docs/screenshots/imports.png" width="195" alt="Imports — link and photo imports with live status">
+</p>
+
+<sub>Screenshots from a seeded demo instance; the placeholder artwork stands
+in for your own food photos.</sub>
+
 ## Stack
 
 Python 3.12 / FastAPI / SQLite (WAL, no ORM) · React 19 / Vite / Tailwind v4 /
