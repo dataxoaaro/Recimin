@@ -57,6 +57,21 @@ def test_hashed_assets_are_immutable(client: TestClient) -> None:
     assert "max-age=31536000" in cache_control
 
 
+def test_the_shell_carries_a_content_security_policy(client: TestClient) -> None:
+    """The SPA document is the XSS blast radius; the policy pins scripts to
+    self and forbids framing."""
+    response = client.get("/")
+    csp = response.headers.get("Content-Security-Policy", "")
+    assert "script-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+
+
+def test_static_files_are_served_nosniff(client: TestClient) -> None:
+    for path in ("/sw.js", "/manifest.webmanifest"):
+        assert client.get(path).headers.get("X-Content-Type-Options") == "nosniff"
+
+
 def test_the_apple_touch_icon_is_an_opaque_png(client: TestClient) -> None:
     """iOS ignores an SVG apple-touch-icon and composites alpha onto black.
 

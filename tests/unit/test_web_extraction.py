@@ -110,6 +110,78 @@ def test_instruction_arrays_are_joined_before_splitting() -> None:
     assert steps[0] == "Lisää sokeri ja vatkaa kunnes seos on vaaleaa."
 
 
+# ─── the SSRF guard ──────────────────────────────────────────────────────
+
+
+def _resolver(mapping: dict[str, str]):
+    """A fake getaddrinfo: named hosts resolve per the mapping, IP literals
+    resolve to themselves."""
+
+    def resolve(host: str, *args: object, **kwargs: object):
+        address = mapping.get(host, host)
+        return [(2, 1, 6, "", (address, 0))]
+
+    return resolve
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/admin",
+        "http://192.168.1.1/router",
+        "http://10.0.0.5/x",
+        "http://169.254.169.254/latest/meta-data/",
+    ],
+)
+def test_private_addresses_are_refused(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worker lives on the household LAN; an import must never become a
+    probe of it."""
+    monkeypatch.setattr(web.socket, "getaddrinfo", _resolver({}))
+    with pytest.raises(web.FetchFailed, match="non-public"):
+        web._reject_non_public_host(url)
+
+
+def test_a_hostname_resolving_privately_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web.socket, "getaddrinfo", _resolver({"innocent.example": "192.168.1.8"}))
+    with pytest.raises(web.FetchFailed, match="non-public"):
+        web._reject_non_public_host("https://innocent.example/recipe")
+
+
+def test_a_redirect_to_a_private_address_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """follow_redirects=True would only guard the first hop; every hop must
+    pass."""
+    import httpx
+
+    monkeypatch.setattr(web.socket, "getaddrinfo", _resolver({"public.example": "93.184.216.34"}))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"Location": "http://192.168.1.1/router"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    with pytest.raises(web.FetchFailed, match="non-public"):
+        web._guarded_get(client, "https://public.example/recipe")
+
+
+def test_a_public_redirect_chain_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    monkeypatch.setattr(
+        web.socket,
+        "getaddrinfo",
+        _resolver({"public.example": "93.184.216.34", "cdn.example": "93.184.216.35"}),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "public.example":
+            return httpx.Response(301, headers={"Location": "https://cdn.example/page"})
+        return httpx.Response(200, text="<html>ok</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    response = web._guarded_get(client, "https://public.example/recipe")
+    assert response.status_code == 200
+    assert response.text == "<html>ok</html>"
+
+
 def test_recipe_category_is_carried_through() -> None:
     """recipeCategory ships as a string or a list; either way persist() gets to
     see it rather than defaulting every import to dinner."""

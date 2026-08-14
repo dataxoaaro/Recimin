@@ -13,9 +13,12 @@ The fetch layer carries two hard-won rules, both in Appendix A:
      recipe blog — has zero JSON-LD and complete microdata.
 """
 
+import ipaddress
 import json
 import logging
+import socket
 from typing import Any
+from urllib.parse import urlsplit
 
 import extruct
 import httpx
@@ -29,6 +32,7 @@ logger = logging.getLogger(__name__)
 TIMEOUT = httpx.Timeout(15.0, connect=10.0)
 RETRY_STATUSES = frozenset({402, 403, 406, 429})
 SYNTAXES = ["json-ld", "microdata", "rdfa"]
+MAX_REDIRECTS = 5
 
 
 class FetchFailed(Exception):
@@ -68,6 +72,41 @@ def build_headers(settings: Settings) -> dict[str, str]:
     }
 
 
+def _reject_non_public_host(url: str) -> None:
+    """SSRF guard: refuse URLs that resolve to private or internal addresses.
+
+    The worker runs inside the household LAN, so "import this URL" must never
+    become "fetch my router's admin page". Checked again on every redirect
+    hop. A DNS answer can still change between this check and the connect;
+    that residual race is accepted — the actor pool is signed-in household
+    members, not the internet.
+    """
+    host = urlsplit(url).hostname or ""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as error:
+        raise FetchFailed(f"cannot resolve {host}") from error
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        if not address.is_global:
+            raise FetchFailed(f"{host} resolves to a non-public address")
+
+
+def _guarded_get(client: httpx.Client, url: str) -> httpx.Response:
+    """GET with redirects followed by hand, re-running the guard per hop.
+
+    follow_redirects=True would let a public URL 302 its way to a private
+    address after the first check had already passed.
+    """
+    for _ in range(MAX_REDIRECTS + 1):
+        _reject_non_public_host(url)
+        response = client.get(url)
+        if response.next_request is None:
+            return response
+        url = str(response.next_request.url)
+    raise FetchFailed("too many redirects")
+
+
 def fetch(url: str, settings: Settings) -> str:
     """Retrieve a page as HTML.
 
@@ -77,11 +116,11 @@ def fetch(url: str, settings: Settings) -> str:
     try:
         with httpx.Client(
             http2=False,
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=TIMEOUT,
             headers=build_headers(settings),
         ) as client:
-            response = client.get(url)
+            response = _guarded_get(client, url)
     except httpx.HTTPError as error:
         raise FetchFailed(f"{type(error).__name__}: {error}") from error
 
@@ -105,12 +144,12 @@ def download_image(url: str, settings: Settings) -> tuple[bytes, str] | None:
     try:
         with httpx.Client(
             http2=False,
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=TIMEOUT,
             headers=build_headers(settings),
         ) as client:
-            response = client.get(url)
-    except httpx.HTTPError as error:
+            response = _guarded_get(client, url)
+    except (httpx.HTTPError, FetchFailed) as error:
         logger.info("hero image fetch failed", extra={"url": url, "error": str(error)[:200]})
         return None
 

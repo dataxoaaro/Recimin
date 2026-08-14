@@ -116,5 +116,13 @@ def serve(media_id: int, _: CurrentUser, conn: DbDep, settings: SettingsDep) -> 
         # on mobile data refetched every hero image on any visit five minutes
         # apart, for bytes it already had. `private` keeps it out of the
         # Cloudflare edge cache, which matters because the route is behind auth.
-        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+        #
+        # nosniff + inline: the mime is from our own allowlist (never HTML or
+        # SVG), and the browser must not second-guess it into something
+        # renderable. Belt and braces for user-supplied bytes.
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f'inline; filename="{media_id}.{path.suffix.lstrip(".")}"',
+        },
     )

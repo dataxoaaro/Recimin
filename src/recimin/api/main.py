@@ -42,6 +42,23 @@ SPA_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 # opposite case and are handled by _ImmutableStatic.
 _NO_CACHE = {"Cache-Control": "no-cache"}
 
+# The shell has no inline scripts (Vite emits external modules only), so
+# script-src can stay strict. 'unsafe-inline' is for styles only: React style
+# attributes carry the category dot colours. frame-ancestors 'none' replaces
+# X-Frame-Options.
+_SHELL_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; media-src 'self'; connect-src 'self'; "
+    "manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; "
+    "base-uri 'self'; form-action 'self'"
+)
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+}
+_SHELL_HEADERS = {**_NO_CACHE, **_SECURITY_HEADERS, "Content-Security-Policy": _SHELL_CSP}
+_FILE_HEADERS = {**_NO_CACHE, **_SECURITY_HEADERS}
+
 
 class _ImmutableStatic(StaticFiles):
     """Static files whose names carry a content hash, so they never change.
@@ -54,6 +71,7 @@ class _ImmutableStatic(StaticFiles):
     def file_response(self, *args: object, **kwargs: object) -> Response:
         response = super().file_response(*args, **kwargs)  # type: ignore[arg-type]
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
 
@@ -74,8 +92,8 @@ def _mount_spa(app: FastAPI) -> None:
         # Serve a real file when one exists (sw.js, manifest, icon), otherwise
         # hand back the shell so deep links like /settings work on reload.
         if path and candidate.is_file() and SPA_DIR in candidate.resolve().parents:
-            return FileResponse(candidate, headers=_NO_CACHE)
-        return FileResponse(SPA_DIR / "index.html", headers=_NO_CACHE)
+            return FileResponse(candidate, headers=_FILE_HEADERS)
+        return FileResponse(SPA_DIR / "index.html", headers=_SHELL_HEADERS)
 
 
 def create_app(

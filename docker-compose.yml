@@ -21,7 +21,11 @@ services:
       dockerfile: docker/api.Dockerfile
     image: recimin-api
     ports:
-      - "8850:8000"
+      # Loopback only. Public traffic arrives through the tunnel container on
+      # the compose network; binding the host port to 127.0.0.1 means nothing
+      # on the LAN can reach the API directly — which is also what makes the
+      # CF-Connecting-IP header trustworthy as a rate-limit key.
+      - "127.0.0.1:8850:8000"
     volumes:
       - ./data:/data
     env_file: .env

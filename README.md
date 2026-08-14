@@ -93,6 +93,18 @@ Zero Trust dashboard, point its public hostname at `http://api:8000` (the
 container, not the host port), set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, and
 start with `docker compose --profile tunnel up -d`.
 
+## Security model
+
+One household, one shared library — deliberately. Registration is gated by a
+shared site password; every signed-in user can read, edit and delete every
+recipe. That is the product, not an oversight, so there is no per-recipe
+ownership. Device tokens (for the iOS Shortcut) are per-phone and individually
+revocable; sessions are stateless 30-day JWTs, so logout clears the cookie
+rather than revoking it server-side — a household-scale tradeoff, made
+knowingly. Imported URLs are refused if they resolve to private or internal
+addresses, on every redirect hop, so an import can never probe the network the
+worker runs on.
+
 ## Importing from an iPhone
 
 [`docs/shortcut-setup.md`](docs/shortcut-setup.md) builds the share-sheet

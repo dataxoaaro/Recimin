@@ -111,6 +111,9 @@ def test_upload_and_serve_round_trip(auth_client: TestClient) -> None:
     assert "max-age=31536000" in cache_control
     # private, so the authenticated bytes are never held in a shared cache.
     assert cache_control.startswith("private")
+    # User-supplied bytes: the browser must never sniff them into a document.
+    assert served.headers["x-content-type-options"] == "nosniff"
+    assert served.headers["content-disposition"].startswith("inline;")
 
 
 def test_upload_refuses_an_executable(auth_client: TestClient) -> None:

@@ -43,6 +43,10 @@ def client_ip(request: Request) -> str:
     Behind Cloudflare, CF-Connecting-IP is the only trustworthy source; the
     socket address is the tunnel. Falling back to the socket keeps local
     development working.
+
+    The header is spoofable by anything that can reach the origin port
+    directly, which is why compose binds it to 127.0.0.1 — and why the
+    per-email login limit, not this per-IP one, is the defence that matters.
     """
     forwarded = request.headers.get("CF-Connecting-IP")
     if forwarded:
