@@ -30,7 +30,17 @@ TIMEOUT_DOWNLOAD = 900
 
 # yt-dlp signals "my extractor is out of date" through exit 100 or this text.
 # IGStore surfaces exactly the same markers.
-NEEDS_UPDATE_MARKERS = ("unable to extract", "unsupported url", "no video formats")
+# Signatures of an extractor that has fallen behind the site rather than a bad
+# URL. "unexpected response from webpage request" is TikTok's current one and
+# was missing, so a broken extractor never triggered the self-update — the
+# error even ends with "Confirm you are on the latest version using yt-dlp -U".
+NEEDS_UPDATE_MARKERS = (
+    "unable to extract",
+    "unsupported url",
+    "no video formats",
+    "unexpected response",
+    "confirm you are on the latest version",
+)
 NEEDS_UPDATE_EXIT = 100
 
 

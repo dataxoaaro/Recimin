@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from recimin.config import Settings
-from recimin.importer import caption, social, ytdlp
+from recimin.importer import caption, gallerydl, social, ytdlp
 from recimin.importer.urls import classify
 
 SETTINGS = Settings(jwt_secret="x" * 32, site_password="site-password")
@@ -304,3 +304,115 @@ def test_store_media_preserves_caller_order(
 
     first = conn.execute("SELECT kind FROM media WHERE id = ?", (ids[0],)).fetchone()
     assert first["kind"] == "image", "the poster must come first, not the video"
+
+
+# ─── the TikTok metadata fallback ────────────────────────────────────────
+
+
+def _dumps(payload: object):
+    """Stand in for a gallery-dl invocation, returning a fixed payload."""
+
+    async def dump(url: str, settings: object, timeout: int) -> object:
+        return payload
+
+    return dump
+
+
+GALLERYDL_POST = [
+    [
+        3,
+        "https://v16.tiktokcdn.com/video.mp4",
+        {
+            "category": "tiktok",
+            "subcategory": "post",
+            "id": "7673211464840121622",
+            "desc": "BIC MAC-PASTASALAATTI\n\nAinesosat: 800g jauhelihaa, 300g pastaa",
+            "title": "BIC MAC-PASTASALAATTI",
+            "author": {"uniqueId": "veronicaleea", "nickname": "Veronica Leea | Valmentaja"},
+        },
+    ]
+]
+
+# What a vm.tiktok.com short link returns: a redirect row and nothing else.
+GALLERYDL_REDIRECT = [
+    [
+        6,
+        "https://www.tiktok.com/@veronicaleea/video/7673211464840121622",
+        {"category": "tiktok", "subcategory": "vmpost"},
+    ]
+]
+
+
+async def test_gallerydl_metadata_reads_the_caption(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The caption is the payload: it is where the ingredients usually are."""
+    monkeypatch.setattr(gallerydl, "_dump_json", _dumps(GALLERYDL_POST))
+
+    metadata = await gallerydl.fetch_metadata("https://www.tiktok.com/@x/video/1", SETTINGS)
+
+    assert metadata.post_id == "7673211464840121622"
+    assert "Ainesosat" in metadata.caption
+    assert metadata.uploader == "veronicaleea"
+
+
+async def test_gallerydl_metadata_follows_a_short_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A vm.tiktok.com link dumps only a redirect row, with no post metadata."""
+    seen: list[str] = []
+
+    async def dump(url: str, settings: object, timeout: int) -> object:
+        seen.append(url)
+        return GALLERYDL_REDIRECT if "vm.tiktok.com" in url else GALLERYDL_POST
+
+    monkeypatch.setattr(gallerydl, "_dump_json", dump)
+
+    metadata = await gallerydl.fetch_metadata("https://vm.tiktok.com/ZN88beMDb/", SETTINGS)
+
+    assert metadata.post_id == "7673211464840121622"
+    assert metadata.webpage_url.startswith("https://www.tiktok.com/@veronicaleea")
+    assert len(seen) == 2, "the short link should be resolved exactly once"
+
+
+async def test_a_short_link_that_only_ever_redirects_gives_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Following forever would hang the worker on a redirect loop."""
+    monkeypatch.setattr(gallerydl, "_dump_json", _dumps(GALLERYDL_REDIRECT))
+
+    with pytest.raises(gallerydl.GalleryDlError, match="short link"):
+        await gallerydl.fetch_metadata("https://vm.tiktok.com/ZN88beMDb/", SETTINGS)
+
+
+async def test_tiktok_metadata_falls_back_to_gallerydl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bug this fixes: yt-dlp's TikTok extractor broke with "Unexpected
+    response from webpage request", and because the gallery-dl fallback existed
+    only in download_media, the import died at the fetch stage without ever
+    reaching the path that works."""
+
+    async def broken(url: str, settings: Settings) -> ytdlp.PostMetadata:
+        raise ytdlp.YtDlpError("Unexpected response from webpage request", needs_update=True)
+
+    monkeypatch.setattr(social.ytdlp, "fetch_metadata", broken)
+    monkeypatch.setattr(social.gallerydl, "_dump_json", _dumps(GALLERYDL_POST))
+
+    metadata = await social.fetch_metadata(classify("https://vm.tiktok.com/ZN88beMDb/"), SETTINGS)
+    assert "Ainesosat" in metadata.caption
+
+
+async def test_instagram_metadata_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """gallery-dl is the TikTok safety net specifically. An Instagram failure is
+    a failure, and dressing it up as something else would hide the real error."""
+
+    async def broken(url: str, settings: Settings) -> ytdlp.PostMetadata:
+        raise ytdlp.YtDlpError("login required")
+
+    monkeypatch.setattr(social.ytdlp, "fetch_metadata", broken)
+
+    url = "https://www.instagram.com/reel/CxNke4OtbOT/"
+    with pytest.raises(social.SocialFetchFailed, match="login required"):
+        await social.fetch_metadata(classify(url), SETTINGS)
+
+
+async def test_a_broken_extractor_is_recognised_as_needing_an_update() -> None:
+    """The marker list did not include TikTok's current failure, so the
+    self-update never fired — even though the error itself says to run -U."""
+    error = ytdlp._classify_failure(1, b"ERROR: Unexpected response from webpage request")
+    assert error.needs_update is True

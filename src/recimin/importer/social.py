@@ -51,11 +51,34 @@ class SocialFetchFailed(Exception):
 
 
 async def fetch_metadata(classified: Classified, settings: Settings) -> ytdlp.PostMetadata:
-    """Caption and post identity, without downloading media."""
+    """Caption and post identity, without downloading media.
+
+    TikTok falls back to gallery-dl exactly as download_media does. That
+    fallback used to exist only on the download side, so when yt-dlp's TikTok
+    extractor broke — "Unexpected response from webpage request" on every video
+    — the import died here, at the fetch stage, before the working path could
+    be reached. The caption is the most valuable thing a social post carries,
+    since it usually holds the ingredients, so it is worth a second attempt.
+    """
     try:
         return await ytdlp.fetch_metadata(classified.normalised, settings)
     except ytdlp.YtDlpError as error:
-        raise SocialFetchFailed(str(error), needs_update=error.needs_update) from error
+        if classified.platform is not Platform.TIKTOK:
+            raise SocialFetchFailed(str(error), needs_update=error.needs_update) from error
+
+        logger.warning(
+            "yt-dlp metadata failed on TikTok, trying gallery-dl",
+            extra={"error": str(error)[:200]},
+        )
+        try:
+            return await gallerydl.fetch_metadata(classified.normalised, settings)
+        except gallerydl.GalleryDlError as fallback_error:
+            # Report yt-dlp's error: it is the primary path, and its message
+            # carries the needs_update signal that triggers a self-update.
+            raise SocialFetchFailed(
+                f"{error} (gallery-dl also failed: {fallback_error})",
+                needs_update=error.needs_update,
+            ) from error
 
 
 async def download_media(classified: Classified, settings: Settings) -> tuple[list[Path], str]:
