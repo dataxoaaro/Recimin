@@ -64,7 +64,7 @@ class PostMetadata:
 
 def base_args(settings: Settings) -> list[str]:
     """Arguments shared by every invocation."""
-    return [
+    args = [
         "yt-dlp",
         "--user-agent",
         settings.scraper_user_agent,
@@ -76,6 +76,14 @@ def base_args(settings: Settings) -> list[str]:
         "--retries",
         "2",
     ]
+    # Without this the Chrome User-Agent above goes out over yt-dlp's own TLS
+    # fingerprint, which is a mismatch a bot check can read directly. The worker
+    # image installs curl-cffi for exactly this and fails to build if no
+    # impersonate target is available; an empty setting omits the flag, for a
+    # yt-dlp built without the extra.
+    if settings.scraper_impersonate:
+        args += ["--impersonate", settings.scraper_impersonate]
+    return args
 
 
 async def _run(args: list[str], timeout: int) -> tuple[int, bytes, bytes]:

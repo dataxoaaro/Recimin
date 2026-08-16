@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     # HTTP
     allowed_origin: str = "http://localhost:5173"
     scraper_user_agent: str = DEFAULT_USER_AGENT
+    # yt-dlp's curl_cffi target. A Chrome User-Agent over yt-dlp's own TLS
+    # fingerprint is a mismatch any competent bot check can see, and the worker
+    # image already installs curl-cffi and fails to build without it.
+    #
+    # A setting rather than a constant for two reasons: a plain `yt-dlp` with no
+    # curl-cffi extra rejects the flag outright, which would break a local
+    # worker run, and if a site ever starts refusing the impersonated
+    # fingerprint this can be emptied without a deploy of new code.
+    scraper_impersonate: str = "chrome"
 
     # LLM
     llm_enabled: bool = True

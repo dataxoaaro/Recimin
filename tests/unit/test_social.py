@@ -416,3 +416,25 @@ async def test_a_broken_extractor_is_recognised_as_needing_an_update() -> None:
     self-update never fired — even though the error itself says to run -U."""
     error = ytdlp._classify_failure(1, b"ERROR: Unexpected response from webpage request")
     assert error.needs_update is True
+
+
+# ─── TLS impersonation ───────────────────────────────────────────────────
+
+
+def test_base_args_requests_a_chrome_tls_fingerprint() -> None:
+    """A Chrome User-Agent sent over yt-dlp's own TLS fingerprint is a mismatch
+    a bot check can read directly. The worker image installs curl-cffi for this
+    and fails to build without an impersonate target, but nothing was asking
+    for one."""
+    args = ytdlp.base_args(SETTINGS)
+    assert "--impersonate" in args
+    assert args[args.index("--impersonate") + 1] == "chrome"
+
+
+def test_impersonation_can_be_turned_off_without_a_code_change() -> None:
+    """A yt-dlp built without the curl-cffi extra rejects the flag outright, and
+    a site could start refusing the impersonated fingerprint."""
+    args = ytdlp.base_args(SETTINGS.model_copy(update={"scraper_impersonate": ""}))
+    assert "--impersonate" not in args
+    # The User-Agent is independent of it and must survive.
+    assert "--user-agent" in args
