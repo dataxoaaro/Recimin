@@ -30,7 +30,11 @@ EXTENSIONS: dict[str, str] = {
     "audio/mpeg": "mp3",
 }
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+# Per-file cap, shared by uploads through the API and media the worker imports.
+# 25 MiB dropped the video from most Instagram reels over a minute long, which
+# left the recipe with only its poster frame. 200 MiB covers a ten-minute
+# TikTok at 1080p. The total-storage budget is settings.max_media_bytes.
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 CHUNK_BYTES = 1 << 20
 
 
@@ -65,7 +69,7 @@ def store_stream(source: BinaryIO, mime: str, *, media_dir: Path) -> StoredFile:
 
     The content address is only known once the last byte is hashed, so the
     stream lands in a temp file and is renamed into place. The size cap is
-    enforced per chunk: an oversized upload is rejected 25MB in, not after it
+    enforced per chunk: an oversized upload is rejected at the cap, not after it
     has been read whole into memory.
     """
     if mime not in EXTENSIONS:

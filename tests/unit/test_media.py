@@ -47,9 +47,10 @@ def test_unsupported_type_is_refused(tmp_path: Path) -> None:
         store.store_bytes(b"MZ", "application/x-msdownload", media_dir=tmp_path)
 
 
-def test_oversized_file_is_refused(tmp_path: Path) -> None:
+def test_oversized_file_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store, "MAX_UPLOAD_BYTES", 64)
     with pytest.raises(store.MediaTooLarge):
-        store.store_bytes(b"x" * (store.MAX_UPLOAD_BYTES + 1), "image/png", media_dir=tmp_path)
+        store.store_bytes(b"x" * 65, "image/png", media_dir=tmp_path)
 
 
 def test_a_multi_chunk_stream_round_trips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
