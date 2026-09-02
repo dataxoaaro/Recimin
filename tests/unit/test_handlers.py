@@ -614,7 +614,9 @@ async def test_a_login_walled_post_goes_straight_to_needs_attention(
     monkeypatch.setattr(social, "fetch_metadata", fail)
     monkeypatch.setattr(handlers.ytdlp, "self_update", update)
 
-    with pytest.raises(NonRetryable, match="without logging in"):
+    with pytest.raises(
+        NonRetryable, match="Cannot import: Instagram only shows this post to logged-in users"
+    ):
         await handlers._fetch_social_metadata(classify(IG_REEL), settings)
     assert updates == []
 
@@ -626,5 +628,7 @@ async def test_a_login_wall_at_download_is_also_terminal(
         raise social.SocialFetchFailed("login required", inaccessible=True)
 
     monkeypatch.setattr(social, "download_media", fail)
-    with pytest.raises(NonRetryable, match="without logging in"):
+    with pytest.raises(
+        NonRetryable, match="Cannot import: Instagram only shows this post to logged-in users"
+    ):
         await handlers._download_social_media(classify(IG_REEL), settings)

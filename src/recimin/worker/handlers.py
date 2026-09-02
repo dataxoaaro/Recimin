@@ -188,8 +188,11 @@ async def _llm_from_page(
     return Extraction(recipe, ingredient_rows=rows, confidence=extracted.confidence)
 
 
+# Shown verbatim on the Imports screen, so it says what happened and why in
+# one breath: the platform only serves the post to logged-in users, and this
+# app never logs in.
 INACCESSIBLE_MESSAGE = (
-    "{platform} will not serve this post without logging in. "
+    "Cannot import: {platform} only shows this post to logged-in users. "
     "It may be private, age-restricted or region-locked."
 )
 
