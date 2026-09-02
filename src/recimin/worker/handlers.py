@@ -188,17 +188,36 @@ async def _llm_from_page(
     return Extraction(recipe, ingredient_rows=rows, confidence=extracted.confidence)
 
 
+# Shown verbatim on the Imports screen, so it says what happened and why in
+# one breath: the platform only serves the post to logged-in users, and this
+# app never logs in.
+INACCESSIBLE_MESSAGE = (
+    "Cannot import: {platform} only shows this post to logged-in users. "
+    "It may be private, age-restricted or region-locked."
+)
+
+
+def _terminal_failure(error: social.SocialFetchFailed, classified: Classified) -> NonRetryable:
+    """A fetch failure no retry or upgrade can fix, phrased for the person who
+    has to read it in the import list."""
+    if error.inaccessible:
+        return NonRetryable(INACCESSIBLE_MESSAGE.format(platform=str(classified.platform).title()))
+    return NonRetryable(f"yt-dlp needs updating: {error}")
+
+
 async def _fetch_social_metadata(classified: Classified, settings: Settings) -> ytdlp.PostMetadata:
     """Fetch a post's metadata, upgrading a stale yt-dlp once before giving up."""
     try:
         return await social.fetch_metadata(classified, settings)
     except social.SocialFetchFailed as error:
+        if error.inaccessible:
+            raise _terminal_failure(error, classified) from None
         if not error.needs_update:
             raise
         # The extractor is stale rather than the URL bad. Try one in-place
         # upgrade; if that does not help, a human has to look.
         if not await ytdlp.self_update():
-            raise NonRetryable(f"yt-dlp needs updating: {error}") from None
+            raise _terminal_failure(error, classified) from None
         return await social.fetch_metadata(classified, settings)
 
 
@@ -279,8 +298,8 @@ async def _download_social_media(
     try:
         files, subtitles = await social.download_media(classified, settings)
     except social.SocialFetchFailed as error:
-        if error.needs_update:
-            raise NonRetryable(f"yt-dlp needs updating: {error}") from None
+        if error.inaccessible or error.needs_update:
+            raise _terminal_failure(error, classified) from None
         raise
 
     video_file = next((f for f in files if f.suffix.lower() in social.VIDEO_SUFFIXES), None)

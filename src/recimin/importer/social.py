@@ -43,19 +43,50 @@ KEEP_SUFFIXES = VIDEO_SUFFIXES | IMAGE_SUFFIXES
 
 
 class SocialFetchFailed(Exception):
-    """The post could not be fetched."""
+    """The post could not be fetched. Flags mirror ytdlp.YtDlpError."""
 
-    def __init__(self, message: str, *, needs_update: bool = False) -> None:
+    def __init__(
+        self, message: str, *, needs_update: bool = False, inaccessible: bool = False
+    ) -> None:
         super().__init__(message)
         self.needs_update = needs_update
+        self.inaccessible = inaccessible
+
+    @classmethod
+    def from_ytdlp(cls, error: ytdlp.YtDlpError, suffix: str = "") -> "SocialFetchFailed":
+        return cls(
+            f"{error}{suffix}", needs_update=error.needs_update, inaccessible=error.inaccessible
+        )
 
 
 async def fetch_metadata(classified: Classified, settings: Settings) -> ytdlp.PostMetadata:
-    """Caption and post identity, without downloading media."""
+    """Caption and post identity, without downloading media.
+
+    TikTok falls back to gallery-dl exactly as download_media does. That
+    fallback used to exist only on the download side, so when yt-dlp's TikTok
+    extractor broke — "Unexpected response from webpage request" on every video
+    — the import died here, at the fetch stage, before the working path could
+    be reached. The caption is the most valuable thing a social post carries,
+    since it usually holds the ingredients, so it is worth a second attempt.
+    """
     try:
         return await ytdlp.fetch_metadata(classified.normalised, settings)
     except ytdlp.YtDlpError as error:
-        raise SocialFetchFailed(str(error), needs_update=error.needs_update) from error
+        if classified.platform is not Platform.TIKTOK:
+            raise SocialFetchFailed.from_ytdlp(error) from error
+
+        logger.warning(
+            "yt-dlp metadata failed on TikTok, trying gallery-dl",
+            extra={"error": str(error)[:200]},
+        )
+        try:
+            return await gallerydl.fetch_metadata(classified.normalised, settings)
+        except gallerydl.GalleryDlError as fallback_error:
+            # Report yt-dlp's error: it is the primary path, and its message
+            # carries the needs_update signal that triggers a self-update.
+            raise SocialFetchFailed.from_ytdlp(
+                error, f" (gallery-dl also failed: {fallback_error})"
+            ) from error
 
 
 async def download_media(classified: Classified, settings: Settings) -> tuple[list[Path], str]:
@@ -73,7 +104,7 @@ async def download_media(classified: Classified, settings: Settings) -> tuple[li
                 files = await ytdlp.download(classified.normalised, workdir, settings)
             except ytdlp.YtDlpError as error:
                 if classified.platform is not Platform.TIKTOK:
-                    raise SocialFetchFailed(str(error), needs_update=error.needs_update) from error
+                    raise SocialFetchFailed.from_ytdlp(error) from error
                 # gallery-dl is the more robust TikTok path when yt-dlp breaks.
                 logger.warning(
                     "yt-dlp failed on TikTok, trying gallery-dl", extra={"error": str(error)}
@@ -127,7 +158,7 @@ def store_media(
     for position, path in enumerate(files):
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if mime not in store.EXTENSIONS:
-            logger.info("skipping unsupported file", extra={"name": path.name, "mime": mime})
+            logger.info("skipping unsupported file", extra={"file": path.name, "mime": mime})
             continue
         try:
             # Streamed, not read whole: a clip is 5-30MB and there is no reason
@@ -135,7 +166,7 @@ def store_media(
             with path.open("rb") as handle:
                 stored = store.store_stream(handle, mime, media_dir=settings.data_dir)
         except (store.MediaTooLarge, store.UnsupportedMediaType) as error:
-            logger.warning("media rejected", extra={"name": path.name, "error": str(error)})
+            logger.warning("media rejected", extra={"file": path.name, "error": str(error)})
             continue
 
         existing = media_repo.find_by_sha256(conn, stored.sha256)

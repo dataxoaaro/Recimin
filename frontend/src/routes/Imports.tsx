@@ -175,9 +175,17 @@ export function Imports() {
                   )}
                   {job.kind === "image" ? t.photoImport : hostOf(job.input_url)}
                 </p>
-                <p className="truncate text-xs text-[var(--color-muted)]">
-                  {job.last_error ?? job.stage ?? job.status.replace("_", " ")}
-                </p>
+                {job.status === "failed" || job.status === "needs_attention" ? (
+                  // The reason a post could not be imported is the one thing
+                  // this row has to say, so it wraps instead of truncating.
+                  <p className="text-xs text-[var(--color-danger)]">
+                    {job.last_error ?? job.status.replace("_", " ")}
+                  </p>
+                ) : (
+                  <p className="truncate text-xs text-[var(--color-muted)]">
+                    {job.stage ?? job.status}
+                  </p>
+                )}
               </div>
               {job.recipe_id && (
                 <Button variant="secondary" size="sm" asChild>

@@ -588,3 +588,47 @@ async def test_the_llm_is_never_called_when_disabled(
 
     # settings has no API key, so extraction must be skipped silently.
     assert await handlers.handle_import(db, job, settings) is not None  # type: ignore[arg-type]
+
+
+# ─── access walls ────────────────────────────────────────────────────────
+
+IG_REEL = "https://www.instagram.com/reel/DOtbZZ6DSWw/"
+
+
+async def test_a_login_walled_post_goes_straight_to_needs_attention(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retrying a private post three times only spends Meta's per-IP tolerance.
+
+    It is also not a stale extractor, so the self-update must not fire.
+    """
+    updates: list[bool] = []
+
+    async def fail(classified: object, settings: object) -> PostMetadata:
+        raise social.SocialFetchFailed("Instagram sent an empty media response", inaccessible=True)
+
+    async def update() -> bool:
+        updates.append(True)
+        return True
+
+    monkeypatch.setattr(social, "fetch_metadata", fail)
+    monkeypatch.setattr(handlers.ytdlp, "self_update", update)
+
+    with pytest.raises(
+        NonRetryable, match="Cannot import: Instagram only shows this post to logged-in users"
+    ):
+        await handlers._fetch_social_metadata(classify(IG_REEL), settings)
+    assert updates == []
+
+
+async def test_a_login_wall_at_download_is_also_terminal(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fail(classified: object, settings: object) -> tuple[list[Path], str]:
+        raise social.SocialFetchFailed("login required", inaccessible=True)
+
+    monkeypatch.setattr(social, "download_media", fail)
+    with pytest.raises(
+        NonRetryable, match="Cannot import: Instagram only shows this post to logged-in users"
+    ):
+        await handlers._download_social_media(classify(IG_REEL), settings)
