@@ -438,3 +438,134 @@ def test_impersonation_can_be_turned_off_without_a_code_change() -> None:
     assert "--impersonate" not in args
     # The User-Agent is independent of it and must survive.
     assert "--user-agent" in args
+
+
+# ─── media rejection must not kill the job ───────────────────────────────
+
+
+def _fresh_db(tmp_path: Path):
+    from recimin.db import schema
+    from recimin.db.connection import connect
+
+    conn = connect(tmp_path / "t.db")
+    schema.migrate(conn)
+    return conn
+
+
+def test_store_media_skips_an_oversized_file_and_keeps_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reel over the size cap is skipped, not fatal.
+
+    Production job 28 died here: the skip branch logged with a reserved
+    LogRecord key and the KeyError escaped, failing all three attempts.
+    """
+    from recimin.media import store
+
+    conn = _fresh_db(tmp_path)
+    monkeypatch.setattr(store, "MAX_UPLOAD_BYTES", 16)
+
+    poster = tmp_path / "clip_poster.jpg"
+    poster.write_bytes(b"\xff\xd8\xff\xe0jpg\xff\xd9")
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+
+    settings = SETTINGS.model_copy(update={"data_dir": tmp_path / "store"})
+    ids = social.store_media(conn, [poster, video], settings=settings, source_url="u")
+
+    assert len(ids) == 1
+    kind = conn.execute("SELECT kind FROM media WHERE id = ?", (ids[0],)).fetchone()["kind"]
+    assert kind == "image"
+
+
+def test_store_media_skips_an_unsupported_file(tmp_path: Path) -> None:
+    conn = _fresh_db(tmp_path)
+    poster = tmp_path / "clip_poster.jpg"
+    poster.write_bytes(b"\xff\xd8\xff\xe0jpg\xff\xd9")
+    stray = tmp_path / "info.json"
+    stray.write_text("{}")
+
+    settings = SETTINGS.model_copy(update={"data_dir": tmp_path / "store"})
+    ids = social.store_media(conn, [stray, poster], settings=settings, source_url="u")
+    assert len(ids) == 1
+
+
+# ─── failure classification ──────────────────────────────────────────────
+
+INSTAGRAM_LOGIN_WALL = (
+    b"ERROR: [Instagram] DOtbZZ6DSWw: Instagram sent an empty media response. "
+    b"Check if this post is accessible in your browser without being logged-in. "
+    b"If it is not, then use --cookies-from-browser or --cookies for the authentication. "
+    b"Confirm you are on the latest version using  yt-dlp -U"
+)
+
+
+def test_a_login_walled_post_is_not_a_stale_extractor() -> None:
+    """yt-dlp appends 'confirm you are on the latest version' to nearly every
+    error, so matching on it turned a private post into a self-update loop."""
+    error = ytdlp._classify_failure(1, INSTAGRAM_LOGIN_WALL)
+    assert error.needs_update is False
+    assert error.inaccessible is True
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        b"ERROR: [Instagram] X: login required",
+        b"ERROR: [TikTok] X: This post may not be comfortable for some audiences. Log in",
+        b"ERROR: [Instagram] X: Requested content is not available, rate-limit reached",
+    ],
+)
+def test_access_walls_are_recognised(stderr: bytes) -> None:
+    assert ytdlp._classify_failure(1, stderr).inaccessible is True
+
+
+def test_a_plain_network_error_is_neither() -> None:
+    error = ytdlp._classify_failure(1, b"ERROR: network unreachable")
+    assert error.needs_update is False
+    assert error.inaccessible is False
+
+
+async def test_social_fetch_carries_the_inaccessible_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fail(url: str, settings: object) -> ytdlp.PostMetadata:
+        raise ytdlp._classify_failure(1, INSTAGRAM_LOGIN_WALL)
+
+    monkeypatch.setattr(ytdlp, "fetch_metadata", fail)
+    with pytest.raises(social.SocialFetchFailed) as raised:
+        await social.fetch_metadata(
+            classify("https://www.instagram.com/reel/DOtbZZ6DSWw/"), SETTINGS
+        )
+    assert raised.value.inaccessible is True
+
+
+# ─── self-update ─────────────────────────────────────────────────────────
+
+
+async def test_self_update_upgrades_through_uv_not_pip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worker venv has no pip; yt-dlp is installed into system python by uv.
+
+    `python -m pip` failed on every production attempt with "No module named
+    pip", so the self-update path never once ran.
+    """
+    seen: list[list[str]] = []
+
+    async def fake_run(args: list[str], timeout: int) -> tuple[int, bytes, bytes]:
+        seen.append(args)
+        return 0, b"", b""
+
+    monkeypatch.setattr(ytdlp, "_run", fake_run)
+    assert await ytdlp.self_update() is True
+    args = seen[0]
+    assert args[:3] == ["uv", "pip", "install"]
+    assert "--system" in args
+    assert "--pre" in args
+    assert "yt-dlp[default,curl-cffi]" in args
+    assert "pip" not in args[3:]
+
+
+async def test_self_update_reports_a_missing_uv(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_run(args: list[str], timeout: int) -> tuple[int, bytes, bytes]:
+        raise FileNotFoundError("uv")
+
+    monkeypatch.setattr(ytdlp, "_run", fake_run)
+    assert await ytdlp.self_update() is False
