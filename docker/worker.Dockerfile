@@ -1,5 +1,5 @@
 # recimin-worker — carries the media toolchain. Deliberately fat; the api image stays slim.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
